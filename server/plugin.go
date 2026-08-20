@@ -40,7 +40,7 @@ func (p *templatePlugin) OnEvent(ctx context.Context, e *pluginsdk.Event) error 
 
 	count, err := incrementEventCount(ctx, host)
 	if err != nil {
-		return fmt.Errorf("kandev-plugin-template: updating event count in Host state: %w", err)
+		return fmt.Errorf("kandev-deepseek-credits: updating event count in Host state: %w", err)
 	}
 	log.Printf("events counted via Host state: %d", count)
 	return nil

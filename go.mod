@@ -1,4 +1,4 @@
-module kandev-plugin-template
+module kandev-plugin-deepseek-credits
 
 go 1.26.0
 

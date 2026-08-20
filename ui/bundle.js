@@ -36,7 +36,7 @@
 // below is one Card built from independent parts — Popover, Progress, Table,
 // Empty — each of which can be removed without touching the others.
 //
-// Rename "kandev-plugin-template" below to your plugin id, then keep / delete
+// Rename "kandev-deepseek-credits" below to your plugin id, then keep / delete
 // registrations to match what your plugin actually contributes.
 
 // ---------------------------------------------------------------------------
@@ -336,7 +336,7 @@ function makePluginPage(host) {
         h(
           CardHeader,
           null,
-          h(CardTitle, { id: "template-page-title" }, "Template plugin"),
+          h(CardTitle, { id: "deepseek-credits-page-title" }, "DeepSeek Credits"),
           h(CardDescription, null, `The ${RECENT_LIMIT} most recent tasks created since this page loaded`),
           h(CardAction, null, h(AboutPopover)),
         ),
@@ -433,7 +433,7 @@ function makeChatToolbarAction(host) {
 // ---------------------------------------------------------------------------
 // Registration. Keep only what your plugin uses.
 // ---------------------------------------------------------------------------
-window.registerKandevPlugin("kandev-plugin-template", {
+window.registerKandevPlugin("kandev-deepseek-credits", {
   initialize(registry, host) {
     // A sidebar entry. `icon` is a curated host icon name; it also becomes the
     // default topbar icon for the route registered on the same path.
