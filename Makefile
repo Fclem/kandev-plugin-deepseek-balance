@@ -1,5 +1,6 @@
 .PHONY: build run test test-backend \
 	fmt vet package package-host verify-package verify-package-host clean
+.PHONY: test-bundle
 
 # When you rename the plugin, update BIN and VERSION to match manifest.yaml's
 # id and version (PKG_OUT is derived from them).
@@ -32,10 +33,14 @@ build:
 run: build
 	./$(BIN)
 
-test: test-backend
+test: test-backend test-bundle
 
 test-backend:
 	go test ./server/...
+
+test-bundle:
+	node --check ui/bundle.js
+	node --test test/bundle.test.mjs
 
 fmt:
 	test -z "$$(gofmt -l .)"
