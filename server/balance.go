@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -169,14 +168,4 @@ func finiteDecimal(s string) bool {
 		return false
 	}
 	return !math.IsNaN(f) && !math.IsInf(f, 0)
-}
-
-// errBalanceCode extracts the BalanceError code from err, or "" if err is not
-// a classified balance failure.
-func errBalanceCode(err error) string {
-	var be *BalanceError
-	if errors.As(err, &be) {
-		return be.Code
-	}
-	return ""
 }
