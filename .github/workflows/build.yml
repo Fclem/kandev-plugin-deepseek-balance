@@ -1,0 +1,44 @@
+name: Build
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build plugin packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out plugin
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          path: plugin
+
+      - name: Check out kandev SDK contract
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: kdlbs/kandev
+          path: kandev
+          ref: f218880ecbaa3d019d65b5d84fca6bdf160eced6
+          sparse-checkout: apps/backend
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: plugin/go.mod
+          cache-dependency-path: plugin/go.sum
+
+      - name: Build host binary
+        working-directory: plugin
+        run: make build
+
+      - name: Package and validate all supported platforms
+        working-directory: plugin
+        run: make verify-package

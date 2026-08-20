@@ -1,0 +1,121 @@
+# kandev plugin manifest — the single declarative contract between your
+# plugin and a kandev host. Everything kandev needs to install, spawn, and
+# route to your plugin is described here. Start by renaming the plugin:
+# change `id`, `display_name`, `description`, and `author` to your own.
+#
+# `id` MUST match the Go module name in go.mod and the id you pass to
+# window.registerKandevPlugin(...) in ui/bundle.js, and it is the prefix of
+# every route kandev serves for you (/api/plugins/<id>/...). Keep the three
+# in sync when you rename.
+id: "kandev-plugin-template"
+api_version: 1
+version: "0.1.0"
+display_name: "Template Plugin"
+description: "Starter template for a kandev native-UI plugin: a nav item + native route, a chat-toolbar action, backend event/webhook handling, and operator settings."
+author: "your-name-here"
+categories: ["tools"]
+
+# min_kandev_version is the oldest kandev release this plugin will install
+# against. A release host compares it to its own version at install time and
+# refuses the package if it is older, so an operator gets a clear error instead
+# of a plugin that loads and then fails on a missing API.
+#
+# 0.86.0 is the floor for THIS template, not a default to copy blindly: it is
+# the first release carrying the host.ui primitives, host.toast and host.utils
+# that ui/bundle.js below actually calls. Raise it when you start using a newer
+# host API; you can lower or drop it if you strip the bundle back to the
+# pre-0.86 surface (Button, Card*, Tooltip*).
+#
+# Two things worth knowing about the check. It only became load-bearing in
+# 0.86.0 — earlier hosts parsed the field and silently ignored it. And it is
+# release-only by design: a host built from a git checkout reports something
+# like "v0.87.1-27-g4705f1fd0", which is not a release version, so the gate is
+# skipped and the install succeeds whatever you put here. Don't read a
+# successful sideload onto your dev instance as proof the floor is right.
+min_kandev_version: "0.86.0"
+
+# runtime.executables maps each supported platform to the binary kandev
+# spawns as a gRPC subprocess. `make package` cross-compiles all five;
+# `make package-host` builds just the current one. The paths are relative to
+# the package root and must match what the Makefile writes into server/.
+runtime:
+  type: binary
+  executables:
+    linux-amd64: "server/plugin-linux-amd64"
+    linux-arm64: "server/plugin-linux-arm64"
+    darwin-amd64: "server/plugin-darwin-amd64"
+    darwin-arm64: "server/plugin-darwin-arm64"
+    windows-amd64: "server/plugin-windows-amd64.exe"
+
+# capabilities gate what the host will do for you. Declare only what you use.
+#   events: WS/backend event types delivered to Plugin.OnEvent (server side).
+#   state:  enables the Host GetState/SetState/... key-value store.
+# Other capabilities exist (e.g. api_read for the Host data API) — see the
+# kandev plugin docs. Remove `events`/`state` if your plugin doesn't need them.
+capabilities:
+  events: ["task.created"]
+  state: true
+
+# Git-provider plugins should opt into recipes/source-control/ as one complete
+# slice. Its provider ownership, actions, reference source, and extra Host
+# capabilities are intentionally absent here so generated plugins do not claim
+# a fake provider or permissions they do not use.
+
+# webhooks kandev proxies to Plugin.HandleWebhook at
+# POST /api/plugins/<id>/webhooks/<key>. Delete this block if unused.
+#
+# Always spell `access` out. It is optional and currently defaults to `public`,
+# but an open kandev PR proposes inverting that default to `authenticated` — so
+# a manifest that omits it is a manifest whose security posture changes under
+# it on a host upgrade. Declaring it is correct under either default.
+#
+# Pick the value deliberately; the two are for different callers:
+#   public         anonymous callers. Correct for a webhook a third party
+#                  delivers to (GitHub, Slack, Stripe) — those senders have no
+#                  kandev identity to present. Your handler owns its own
+#                  verification (signature header, shared secret in a `secret:`
+#                  config field). Body limit is capped at 4 MiB.
+#   authenticated  requires a kandev identity (session cookie or PAT). Correct
+#                  for a webhook only your own scripts or CI call. Raises the
+#                  max_body_bytes ceiling to 16 MiB.
+#
+# This example is `public` because it exists to demonstrate the external
+# delivery path — that is what makes it curl-able from anywhere with no
+# credential, which is exactly why a real public webhook must authenticate its
+# caller itself.
+#
+# If what you actually want is to call your plugin from your OWN frontend
+# bundle, neither value is right: use an `actions:` entry instead. The host
+# authenticates and authorizes those, and host.api.fetch is documented as MUST
+# NOT target a public webhook path.
+webhooks:
+  - key: "ping"
+    description: "Example inbound webhook; logs the delivery and returns 200."
+    method: "POST"
+    access: "public"
+
+# ui.bundle points at your hand-written, no-build ES module frontend half.
+# Remove this section for a backend-only plugin.
+ui:
+  bundle: "/ui/bundle.js"
+
+# config_schema declares operator-editable settings, rendered as a form at
+# Settings > Plugins > <display_name>. The plugin process reads saved values
+# through the Host GetConfig RPC (see greeting() in server/plugin.go, which
+# uses it to build the webhook reply). Fields marked `secret: true` render as
+# password inputs, are stored in kandev's encrypted vault, and are masked
+# everywhere except inside the plugin process. Delete this block if your
+# plugin has no settings.
+config_schema:
+  type: object
+  properties:
+    greeting:
+      type: string
+      title: "Greeting"
+      description: "Word the ping webhook reply starts with (empty = \"Hello\")."
+      default: "Hello"
+    api_token:
+      type: string
+      title: "API token"
+      description: "Example secret setting: masked in the UI and on the operator API, cleartext only inside the plugin process."
+      secret: true

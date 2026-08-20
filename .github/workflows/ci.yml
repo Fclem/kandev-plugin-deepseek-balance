@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Tidy, format, vet, and test
+    runs-on: ubuntu-latest
+    steps:
+      # The local SDK replacement in go.mod expects these checkouts to be
+      # siblings: plugin/../kandev/apps/backend.
+      - name: Check out plugin
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          path: plugin
+
+      - name: Check out kandev SDK contract
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: kdlbs/kandev
+          path: kandev
+          ref: f218880ecbaa3d019d65b5d84fca6bdf160eced6
+          sparse-checkout: |
+            apps/backend
+            apps/packages/plugin-sdk
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: plugin/go.mod
+          cache-dependency-path: plugin/go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+
+      - name: Install recipe test dependencies
+        working-directory: plugin
+        run: npm ci --ignore-scripts
+
+      - name: Check module files are tidy
+        working-directory: plugin
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Check formatting
+        working-directory: plugin
+        run: |
+          test -z "$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
+
+      - name: Vet
+        working-directory: plugin
+        run: make vet
+
+      - name: Test
+        working-directory: plugin
+        run: |
+          make test
+          make audit-recipes
+
+  base-floor:
+    name: Default template on Kandev v0.86.0
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out plugin
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          path: plugin
+
+      - name: Check out declared minimum SDK
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: kdlbs/kandev
+          path: kandev
+          ref: v0.86.0
+          sparse-checkout: apps/backend
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: plugin/go.mod
+          cache-dependency-path: plugin/go.sum
+
+      - name: Test provider-free generated backend
+        working-directory: plugin
+        run: go test ./server/...
