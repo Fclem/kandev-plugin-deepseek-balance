@@ -502,6 +502,28 @@ test("prompt click opens after a pointer entry without duplicate loads", async (
   assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 1, "click opens after pointer entry");
   mounted.unmount();
 });
+
+test("prompt focus followed by click keeps the panel open", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, actionCalls, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(0, okData({ display_prompt_input: true }));
+
+  promptPillOf(mounted.tree()).props.onFocus();
+  promptPillOf(mounted.tree()).props.onClick();
+  assert.equal(actionCalls.length, 2, "focus and click issue one follow-up load");
+  assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 1, "focus-then-click leaves panel open");
+  mounted.unmount();
+});
+
+test("prompt touch-style click opens without focus", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(0, okData({ display_prompt_input: true }));
+
+  promptPillOf(mounted.tree()).props.onClick();
+  assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 1, "touch-style click opens the panel");
+  mounted.unmount();
+});
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -769,6 +791,18 @@ test("hover opens the panel and mouseleave schedules close via the padding-bridg
   timeouts.clear();
   fn();
   assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 0, "panel closed after the timer fires");
+});
+
+test("unmount clears a pending topbar close timer", async () => {
+  const { plugin, timeouts } = loadPlugin();
+  const { mounted, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
+  await resolveAction(0, okData());
+
+  const wrap = everyElement(mounted.tree(), (n) => n.type === "div" && typeof n.props.onMouseEnter === "function")[0];
+  wrap.props.onMouseLeave();
+  assert.equal(timeouts.size, 1, "close timer is pending before unmount");
+  mounted.unmount();
+  assert.equal(timeouts.size, 0, "unmount clears the pending close timer");
 });
 
 test("click toggles the panel", async () => {

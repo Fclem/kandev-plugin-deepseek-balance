@@ -397,7 +397,6 @@ function makeTopBarBalance(host) {
     var setRefreshing = refreshingHook[1];
     var wrapRef = React.useRef(null);
     var closeTimer = React.useRef(null);
-
     // fetchBalance reads the balance.get action. A forced refresh travels in
     // the action body ({ refresh: true }); the silent path sends no body so it
     // serves the backend's cached snapshot. A rejection (non-2xx, host 504,
@@ -442,6 +441,10 @@ function makeTopBarBalance(host) {
       return function () {
         clearInterval(id);
         activeIntervals.delete(id);
+        if (closeTimer.current) {
+          clearTimeout(closeTimer.current);
+          closeTimer.current = null;
+        }
       };
     }, [workspaceId]);
 
@@ -543,7 +546,7 @@ function makePromptBalance(host) {
     var setRefreshing = refreshingHook[1];
     var wrapRef = React.useRef(null);
     var closeTimer = React.useRef(null);
-
+    var focusOpened = React.useRef(false);
     function load(force) {
       if (!taskId) return;
       if (force) setRefreshing(true);
@@ -565,7 +568,8 @@ function makePromptBalance(host) {
       return function () {
         clearInterval(id);
         activeIntervals.delete(id);
-        if (closeTimer.current) clearTimeout(closeTimer.current);
+        clearTimeout(closeTimer.current);
+        closeTimer.current = null;
       };
     }, [taskId]);
 
@@ -590,9 +594,20 @@ function makePromptBalance(host) {
       cancelClose();
       closeTimer.current = setTimeout(function () { setOpen(false); }, 260);
     }
+    function openFromFocus() {
+      if (!open) focusOpened.current = true;
+      openNow();
+    }
     function toggle() {
-      if (open) setOpen(false);
-      else openNow();
+      if (focusOpened.current) {
+        focusOpened.current = false;
+        cancelClose();
+        setOpen(true);
+      } else if (open) {
+        setOpen(false);
+      } else {
+        openNow();
+      }
     }
 
     var d = state.data;
@@ -616,7 +631,7 @@ function makePromptBalance(host) {
           className: "h-7 gap-1.5 px-1.5 text-xs text-muted-foreground hover:bg-primary/10 hover:text-foreground",
           "aria-label": "DeepSeek API balance",
           "aria-haspopup": "dialog",
-          onFocus: openNow,
+          onFocus: openFromFocus,
           onClick: toggle,
         },
         pillContent(h, d, { showAmount: promptShowsAmount(d) }),
