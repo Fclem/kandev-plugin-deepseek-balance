@@ -1,470 +1,494 @@
-// kandev plugin UI bundle — the frontend half of this plugin.
+// DeepSeek Credits — kandev plugin UI bundle.
 //
-// This is a hand-written, NO-BUILD plain-JS ES module. It ships byte-for-byte
-// inside the package tar.gz under ui/bundle.js, and kandev serves it directly
-// from the extracted package at GET /api/plugins/<id>/ui/bundle.js, then
-// dynamically imports it as a native ES module. There is nothing to build:
-// edit this file and repackage (`make package` / `make package-host`).
+// Hand-written, NO-BUILD plain-JS ES module (shared host React via host.jsx —
+// never bundles its own React). Registers one component:
+//   • "chat-top-bar" — a pill in the session top bar showing the DeepSeek
+//     account balance: a DeepSeek monogram chip plus the formatted total of
+//     the primary currency. Hovering (desktop) or clicking/tapping (all
+//     surfaces) opens a panel below the pill with the granted/topped-up
+//     breakdown, every currency entry, the is_available status, the
+//     last-updated time, and a Refresh control.
 //
-// The contract, in three touch points:
-//   - window.registerKandevPlugin(id, { initialize, destroy }) is the single
-//     global entry point the host calls once this module has been evaluated.
-//     `id` MUST match manifest.yaml's id.
-//   - The `host` object handed to initialize() carries the SHARED host React
-//     instance (`host.React`, `host.jsx` == host.React.createElement) plus a
-//     curated design system (`host.ui`), imperative toasts (`host.toast`),
-//     shared helpers (`host.utils`), the live theme (`host.theme` /
-//     `host.onThemeChange`), provider-neutral context (`host.context`), and
-//     navigation (`host.navigate`). NEVER import or bundle your own React —
-//     that breaks hook identity across the host tree. The same goes for
-//     recharts: use the `host.ui.Chart*` wrappers, because a second copy splits the
-//     context its tooltips and legends resolve through, exactly like React.
-//   - `registry` is where you declare nav items, routes, slot components,
-//     providers, task actions, review surfaces, and WS handlers. Every
-//     registration is tracked under this plugin's id, so
-//     the host bulk-unregisters everything when the plugin is disabled.
-//
-// `host.ui` is much broader than the few components used below — Accordion*,
-// Collapsible*, Select*, Tabs*, Sheet*, Pagination*, ScrollArea, Skeleton,
-// Switch, the Chart* recharts wrappers, and kandev's own PageTopbar,
-// Combobox and TaskCreateDialog are all there. Reach for one before
-// hand-rolling: a styled <div> progress bar or a getBoundingClientRect
-// popover will drift from the app around it. The authoritative list is
-// `apps/web/lib/plugins/host-api.ts` (`PLUGIN_UI`) in the kandev repo.
-//
-// Everything in this file is meant to be deleted piece by piece. The page
-// below is one Card built from independent parts — Popover, Progress, Table,
-// Empty — each of which can be removed without touching the others.
-//
-// Rename "kandev-plugin-template" below to your plugin id, then keep / delete
-// registrations to match what your plugin actually contributes.
+// All data comes from this plugin's Go backend through the authenticated,
+// workspace-scoped `balance.get` action (host.api.invokeAction) — this bundle
+// only renders the response. The action body carries the forced-refresh flag
+// ({ refresh: true }) because the host action envelope (ActionInput) has no
+// free-form keys.
 
-// ---------------------------------------------------------------------------
-// A tiny module-level pub/sub holding the most recent task.created deliveries.
-// Kept outside any component so the list survives route navigation and is
-// shared by every subscriber. Delete this if you don't register a WS handler.
-// ---------------------------------------------------------------------------
+// AUTO_REFRESH_MS is how often the UI silently re-reads the backend's warm
+// snapshot (no body, no forced rebuild) so an open panel / the pill keep up
+// with the server-side poller without forcing DeepSeek round trips.
+var AUTO_REFRESH_MS = 60 * 1000;
+var TOPBAR_STYLE_ID = "kandev-deepseek-credits-topbar-style";
+var TOPBAR_ID = "deepseek-credits-topbar";
+var PANEL_WIDTH = 272;
 
-// How many deliveries we keep. Also the denominator of the Progress bar below,
-// which is the honest thing for it to show: how full this buffer is.
-const RECENT_LIMIT = 5;
+var TOPBAR_CSS =
+  "#deepseek-credits-topbar{height:28px;min-height:28px}" +
+  "@media (max-width:639px){#deepseek-credits-topbar{height:44px;min-height:44px}}" +
+  "#deepseek-credits-topbar [data-deepseek-state=loading]{animation:deepseek-credits-pulse 1.6s ease-in-out infinite}" +
+  "@keyframes deepseek-credits-pulse{0%,100%{opacity:1}50%{opacity:0.45}}";
 
-let recentTasks = []; // newest first, capped at RECENT_LIMIT
-const recentListeners = new Set();
-
-function publishRecentTasks(next) {
-  recentTasks = next;
-  for (const listener of recentListeners) listener(recentTasks);
+function injectTopbarStyles() {
+  if (typeof document === "undefined") return;
+  if (document.getElementById(TOPBAR_STYLE_ID)) return;
+  var style = document.createElement("style");
+  style.id = TOPBAR_STYLE_ID;
+  style.textContent = TOPBAR_CSS;
+  document.head.appendChild(style);
 }
 
-// recordTask turns one task.created WS payload into a row. The payload is the
-// backend's task event shape (snake_case: task_id, title, workspace_id, ...);
-// it carries no "delivered at" field, so we stamp arrival ourselves — that is
-// the timestamp the table renders through host.utils.formatRelativeTime.
-function recordTask(payload) {
-  const task = payload || {};
-  const entry = {
-    taskId: task.task_id || "unknown",
-    title: task.title || "Untitled task",
-    seenAt: new Date().toISOString(),
-  };
-  publishRecentTasks([entry, ...recentTasks].slice(0, RECENT_LIMIT));
+function removeTopbarStyles() {
+  if (typeof document === "undefined") return;
+  var style = document.getElementById(TOPBAR_STYLE_ID);
+  if (style && style.parentNode) style.parentNode.removeChild(style);
 }
 
-// useRecentTasks re-renders its component whenever publishRecentTasks fires.
-// Built on host.React's useState/useEffect since this bundle can't ship its
-// own useSyncExternalStore without bundling React.
-function useRecentTasks(React) {
-  const [tasks, setTasks] = React.useState(recentTasks);
-  React.useEffect(() => {
-    // Resync first: a delivery may have landed between the initial render and
-    // this subscription.
-    setTasks(recentTasks);
-    recentListeners.add(setTasks);
-    return () => recentListeners.delete(setTasks);
-  }, []);
-  return tasks;
+// activeIntervals lets plugin destroy() clear the silent re-read timers even
+// when the component outlived a registry teardown edge.
+var activeIntervals = new Set();
+
+// ---- palette ---------------------------------------------------------------
+// Calm by default: normal balance is soft indigo, low balance warms to amber,
+// and an unavailable account is muted coral (never a hard red).
+var COLOR = {
+  indigo: "#8085e6",
+  amber: "#e0a95e",
+  coral: "#d97b6c",
+  brand: "#4D6BFE",
+};
+
+// formatBalance renders a currency amount the way the pill and panel show it:
+// narrowSymbol so CNY renders ¥ and USD $, tabular digits. Compact notation is
+// used when the amount would overflow the pill.
+function formatBalance(value, currency, opts) {
+  opts = opts || {};
+  var compact = !!opts.compact;
+  try {
+    return new Intl.NumberFormat(opts.locale || undefined, {
+      style: "currency",
+      currency: currency,
+      currencyDisplay: "narrowSymbol",
+      notation: compact ? "compact" : "standard",
+      minimumFractionDigits: compact ? 0 : 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  } catch (e) {
+    // Unknown currency code (a future DeepSeek currency): fall back to the
+    // raw number so the pill never crashes or renders NaN.
+    return String(value);
+  }
 }
 
-// ---------------------------------------------------------------------------
-// useHostTheme — the live light/dark theme, as component state.
-//
-// `host.theme` is a getter evaluated on every access, but `host` is built once
-// per plugin load: read it into a variable that outlives a render and you have
-// frozen it. Anything that only *styles* things can ignore this entirely —
-// every host.ui component and every Tailwind/CSS-variable class already
-// follows the theme on its own. You need this hook for the narrow case where
-// your plugin computes a color itself (canvas painting, an inline SVG fill,
-// a color passed to a chart) or, as below, displays the theme.
-//
-// Delete this together with whatever reads it.
-// ---------------------------------------------------------------------------
-function useHostTheme(host) {
-  const React = host.React;
-  const [theme, setTheme] = React.useState(host.theme);
-  React.useEffect(() => {
-    setTheme(host.theme); // resync, same reason as above
-    // onThemeChange returns its own unsubscribe — returning it straight from
-    // the effect is the whole teardown. Skipping it leaks a listener that
-    // outlives the component.
-    return host.onThemeChange(setTheme);
-  }, []);
-  return theme;
+// primaryInfo returns the first balance_infos entry — the spec's primary
+// currency, preserving DeepSeek's response order.
+function primaryInfo(d) {
+  var infos = (d && d.balance_infos) || [];
+  return infos.length ? infos[0] : null;
 }
 
-// ---------------------------------------------------------------------------
-// Inline SVG icons. The bundle ships no build step and can't import an icon
-// set (that would mean bundling), so glyphs are drawn by hand at 16px to match
-// first-party icons. Swap for your own.
-// ---------------------------------------------------------------------------
-function icon(h, path, size) {
+// pillTone resolves the pill's signal color from the action response: muted
+// coral while is_available is false (wins over amber), amber below the
+// server-sent warn_below, calm indigo otherwise. null means neutral (loading /
+// unconfigured / error without a snapshot).
+function pillTone(d) {
+  if (!d) return null;
+  if (d.is_available === false) return COLOR.coral;
+  var primary = primaryInfo(d);
+  if (primary && typeof d.warn_below === "number") {
+    var total = Number(primary.total_balance);
+    if (isFinite(total) && total < d.warn_below) return COLOR.amber;
+  }
+  return COLOR.indigo;
+}
+
+// pillState maps the action status to the pill's data-state, which drives the
+// checking/unavailable distinction via the injected CSS.
+function pillState(d) {
+  if (!d) return "loading";
+  return d.status || "loading";
+}
+
+// usagePopoverPosition anchors the fixed panel below the trigger rect, clamped
+// to the viewport (copied from kandev-plugin-provider-usage).
+function usagePopoverPosition(rect, viewportWidth, viewportHeight, placement) {
+  var left = Math.max(8, Math.min(rect.right - PANEL_WIDTH, viewportWidth - PANEL_WIDTH - 8));
+  if (placement === "above") {
+    return { bottom: Math.max(0, viewportHeight - rect.top), left: left };
+  }
+  return { top: rect.bottom, left: left };
+}
+
+// monogram renders the DeepSeek chip: a brand-hue rounded square with a "Ds"
+// monogram (no hand-drawn whale). tone null renders the neutral muted chip;
+// state drives the pulse for the checking state.
+function monogram(h, size, opts) {
+  opts = opts || {};
+  var tone = opts.tone || null;
+  var state = opts.state || "ok";
+  var bg = tone || "rgba(128,128,140,0.16)";
+  var fg = tone || "#8b8b98";
+  var s = size || 14;
   return h(
-    "svg",
+    "span",
     {
-      xmlns: "http://www.w3.org/2000/svg",
-      width: size || 16,
-      height: size || 16,
-      viewBox: "0 0 24 24",
-      fill: "none",
-      stroke: "currentColor", // follows the theme with no JS — see useHostTheme
-      strokeWidth: 2,
-      strokeLinecap: "round",
-      strokeLinejoin: "round",
       "aria-hidden": "true",
+      "data-deepseek-state": state,
+      style: {
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: s + "px",
+        height: s + "px",
+        borderRadius: Math.max(4, Math.round(s * 0.36)) + "px",
+        background: bg,
+        color: fg,
+        fontSize: Math.max(8, Math.round(s * 0.52)) + "px",
+        fontWeight: 700,
+        lineHeight: 1,
+        fontVariantNumeric: "tabular-nums",
+      },
     },
-    h("path", { d: path }),
+    "Ds",
   );
 }
 
-const STAR_PATH = "M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 18l-6.1 3.4 1.4-6.8L2.2 9.9l6.9-.8L12 2z";
-const INFO_PATH = "M12 16v-4M12 8h.01M12 21a9 9 0 100-18 9 9 0 000 18z";
-const INBOX_PATH = "M22 12h-6l-2 3h-4l-2-3H2M5.5 5h13l3.5 7v6a2 2 0 01-2 2H4a2 2 0 01-2-2v-6l3.5-7z";
-
-// The host renders shortcuts with the platform's own modifier glyph; match it
-// rather than hard-coding "Ctrl", which is simply wrong on macOS.
-const MOD_KEY = /Mac|iPhone|iPad/i.test((navigator && navigator.platform) || "") ? "⌘" : "Ctrl";
-
-// ---------------------------------------------------------------------------
-// A native route/page, rendered inside the kandev SPA (not an iframe) from the
-// host's own design system. The host renders its first-party title bar above
-// this page; here we contribute only the body.
-// ---------------------------------------------------------------------------
-function makePluginPage(host) {
-  const { jsx: h, ui, toast, utils } = host;
-  const {
-    Button,
-    Card,
-    CardAction,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-    Empty,
-    EmptyDescription,
-    EmptyHeader,
-    EmptyMedia,
-    EmptyTitle,
-    Kbd,
-    KbdGroup,
-    Popover,
-    PopoverContent,
-    PopoverDescription,
-    PopoverHeader,
-    PopoverTitle,
-    PopoverTrigger,
-    Progress,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-  } = ui;
-
-  // AboutPopover — host.ui.Popover*, positioned by the host (Radix), so it
-  // flips and clamps at the viewport edge without any getBoundingClientRect
-  // math of your own. Delete this and the CardAction wrapping it together.
-  function AboutPopover() {
-    // The one thing on this page that genuinely needs a theme subscription:
-    // it prints the resolved value, so a stale read is visible as a wrong
-    // label when the user flips the theme with this popover open.
-    const theme = useHostTheme(host);
-
+// pillContent renders what the pill shows: the monogram plus the formatted
+// primary-currency total when one exists; icon-only (colored by is_available)
+// for an account with no balance data; the neutral muted chip for the
+// loading / unconfigured / error-without-snapshot states.
+function pillContent(h, d) {
+  var status = pillState(d);
+  var primary = primaryInfo(d);
+  if (primary) {
+    var tone = pillTone(d);
+    var amount = Number(primary.total_balance);
+    var compact = isFinite(amount) && Math.abs(amount) >= 1e6;
     return h(
-      Popover,
-      null,
+      "span",
+      { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
+      monogram(h, 14, { tone: COLOR.brand, state: status }),
       h(
-        PopoverTrigger,
-        { asChild: true },
-        h(
-          Button,
-          {
-            id: "template-about-trigger",
-            type: "button",
-            variant: "ghost",
-            size: "icon",
-            className: "h-7 w-7",
-            "aria-label": "About this page",
+        "span",
+        {
+          style: {
+            fontVariantNumeric: "tabular-nums",
+            fontWeight: 600,
+            color: tone || "var(--muted-foreground)",
           },
-          icon(h, INFO_PATH),
-        ),
+        },
+        formatBalance(amount, primary.currency, { compact: compact }),
       ),
+    );
+  }
+  // No primary currency (empty balance_infos, or loading/unconfigured/error):
+  // icon-only. The tone carries the is_available signal when a snapshot
+  // exists; neutral otherwise.
+  var tone = null;
+  if (status === "ok" || status === "error") {
+    tone = pillTone(d);
+  }
+  return monogram(h, 14, { tone: tone, state: status });
+}
+
+// ---- the panel --------------------------------------------------------------
+
+function panelRow(h, label, value) {
+  return h(
+    "div",
+    { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" } },
+    h("span", { style: { color: "var(--muted-foreground)", fontSize: "12px" } }, label),
+    h("span", { style: { fontVariantNumeric: "tabular-nums", fontWeight: 600, fontSize: "12px" } }, value),
+  );
+}
+
+// panelBody renders the panel content for the current action response.
+function panelBody(h, ui, host, d, refreshing, onRefresh) {
+  var status = d ? d.status : "loading";
+
+  var header = h(
+    "div",
+    { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" } },
+    monogram(h, 18, { tone: COLOR.brand }),
+    h("span", { style: { fontWeight: 600, fontSize: "13px" } }, "DeepSeek Credits"),
+  );
+
+  var body = [];
+
+  if (status === "unconfigured") {
+    body.push(
       h(
-        PopoverContent,
-        { align: "end", className: "w-80" },
+        "div",
+        { style: { fontSize: "12px", lineHeight: 1.5, color: "var(--muted-foreground)" } },
+        "No API key configured.",
+        h("br"),
+        "Set it in Settings → Plugins → DeepSeek Credits, or provide the DEEPSEEK_API_KEY environment variable.",
+      ),
+    );
+  } else if (status === "loading") {
+    body.push(
+      h("div", { style: { fontSize: "12px", color: "var(--muted-foreground)" } }, "Checking balance…"),
+    );
+  } else {
+    var primary = primaryInfo(d);
+    var hasBalance = !!primary;
+
+    // The insufficient-balance status LEADS the panel when DeepSeek reports
+    // the account unavailable.
+    if (d.is_available === false) {
+      body.push(
+        h("div", { style: { fontSize: "12px", fontWeight: 600, color: COLOR.coral, marginBottom: hasBalance ? "8px" : "0" } },
+          "Unavailable: insufficient balance"),
+      );
+    }
+
+    if (hasBalance) {
+      var total = Number(primary.total_balance);
+      body.push(
         h(
-          PopoverHeader,
-          null,
-          h(PopoverTitle, null, "Where these rows come from"),
+          "div",
+          { style: { marginBottom: "10px" } },
+          h("div", { style: { fontSize: "11px", color: "var(--muted-foreground)", marginBottom: "2px" } }, "Total balance"),
           h(
-            PopoverDescription,
-            null,
-            "The registerWsHandler(\"task.created\", ...) call at the bottom of ",
-            "ui/bundle.js. It fires for every task created anywhere in kandev ",
-            "while this tab is open — no polling, no refetch.",
+            "div",
+            { style: { fontSize: "20px", fontWeight: 700, fontVariantNumeric: "tabular-nums", lineHeight: 1.2 } },
+            formatBalance(total, primary.currency),
           ),
         ),
-        h(
-          "p",
-          { className: "text-muted-foreground mt-3 text-xs" },
-          "Create one with ",
-          // host.ui.Kbd renders a key the same way the app's own shortcut
-          // surfaces do. This is kandev's real "new task" binding.
-          h(KbdGroup, null, h(Kbd, null, MOD_KEY), h(Kbd, null, "N")),
-          " to watch a row appear.",
-        ),
-        h(
-          "p",
-          { id: "template-theme-readout", className: "text-muted-foreground mt-3 text-xs" },
-          `Host theme: ${theme}. `,
-          "Everything above follows it with no JS — host.ui components and CSS ",
-          "variables restyle themselves. Subscribe via host.onThemeChange only ",
-          "for colors you compute yourself.",
-        ),
-      ),
-    );
-  }
+        panelRow(h, "Granted", formatBalance(Number(primary.granted_balance), primary.currency)),
+        panelRow(h, "Topped up", formatBalance(Number(primary.topped_up_balance), primary.currency)),
+      );
+    }
 
-  // RecentTasksTable / EmptyState — the two halves of the same slot. Keep
-  // whichever matches your data and delete the other; an empty state built
-  // from host.ui.Empty* costs nothing and stops your page from looking broken
-  // before its first delivery.
-  function RecentTasksTable({ tasks }) {
-    return h(
-      Table,
-      null,
-      h(
-        TableHeader,
-        null,
-        h(
-          TableRow,
-          null,
-          h(TableHead, null, "Task"),
-          h(TableHead, { className: "w-32 text-right" }, "Seen"),
-        ),
-      ),
-      h(
-        TableBody,
-        null,
-        tasks.map((task) =>
-          h(
-            TableRow,
-            { key: `${task.taskId}-${task.seenAt}` },
-            h(TableCell, { className: "font-medium" }, task.title),
-            h(
-              TableCell,
-              { className: "text-muted-foreground text-right text-xs" },
-              // host.utils.formatRelativeTime is locale-aware
-              // (Intl.RelativeTimeFormat) in the user's active locale. A
-              // hand-rolled "3 minutes ago" ladder is English-only by
-              // construction and silently untranslated for everyone else.
-              utils.formatRelativeTime(task.seenAt),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+    // Every currency entry when the account has several.
+    var infos = (d.balance_infos || []).slice(1);
+    if (infos.length) {
+      body.push(
+        h("div", { style: { fontSize: "11px", color: "var(--muted-foreground)", marginTop: "10px", marginBottom: "4px" } },
+          "Other currencies"),
+      );
+      infos.forEach(function (info) {
+        body.push(
+          panelRow(h, info.currency, formatBalance(Number(info.total_balance), info.currency)),
+        );
+      });
+    }
 
-  function EmptyState() {
-    return h(
-      Empty,
-      { id: "template-page-empty" },
-      h(
-        EmptyHeader,
-        null,
-        h(EmptyMedia, { variant: "icon" }, icon(h, INBOX_PATH)),
-        h(EmptyTitle, null, "No tasks created yet"),
-        h(
-          EmptyDescription,
-          null,
-          "This page fills in as tasks are created while it is open.",
-        ),
-      ),
-    );
-  }
+    // is_available status line (not already led by the unavailable line above).
+    if (d.is_available === true) {
+      body.push(
+        h("div", { style: { fontSize: "12px", color: "var(--muted-foreground)", marginTop: "8px" } },
+          "Status: available"),
+      );
+    }
 
-  return function PluginPage() {
-    const tasks = useRecentTasks(host.React);
-    const isEmpty = tasks.length === 0;
-
-    // One action, wired to both toast variants. host.toast is imperative — the
-    // host mounts the single <Toaster/>, so there is nothing to render and it
-    // works from anywhere, including inside host.openModal content.
-    //
-    // The button stays enabled when the buffer is empty on purpose: that is
-    // what makes the .error path reachable. toast.error renders like any other
-    // variant and logs `[plugins] toast.error from "<id>"` to the console, but
-    // deliberately files NO backend error report — kandev's error log is for
-    // kandev's own faults, not a plugin reporting an expected condition.
-    const onClear = () => {
-      if (isEmpty) {
-        toast.error("Nothing to clear yet");
-        return;
+    // A failure after a success keeps the last-known balance rendered; the
+    // reason is shown so the operator knows the number is stale.
+    if (status === "error" && d.error) {
+      body.push(
+        h("div", { style: { fontSize: "12px", lineHeight: 1.5, color: COLOR.coral, marginTop: "8px" } },
+          "Last check failed: " + d.error.message),
+      );
+      if (!hasBalance) {
+        body.push(
+          h("div", { style: { fontSize: "12px", lineHeight: 1.5, color: "var(--muted-foreground)", marginTop: "4px" } },
+            "Check the key in Settings → Plugins → DeepSeek Credits, or the DEEPSEEK_API_KEY environment variable."),
+        );
       }
-      const cleared = tasks.length;
-      publishRecentTasks([]);
-      toast.success(`Cleared ${cleared} row${cleared === 1 ? "" : "s"}`);
-    };
+    }
+
+    if (d.fetched_at) {
+      body.push(
+        h("div", { style: { fontSize: "11px", color: "var(--muted-foreground)", marginTop: "10px" } },
+          "Updated " + host.utils.formatRelativeTime(d.fetched_at)),
+      );
+    }
+
+    body.push(
+      h(
+        "div",
+        { style: { marginTop: "12px" } },
+        h(
+          ui.Button,
+          {
+            id: "deepseek-credits-refresh",
+            type: "button",
+            variant: "outline",
+            size: "sm",
+            disabled: !!refreshing,
+            className: "w-full",
+            onClick: onRefresh,
+          },
+          refreshing ? "Refreshing…" : "Refresh",
+        ),
+      ),
+    );
+  }
+
+  return h("div", null, header, body);
+}
+
+// ---- the chat-top-bar component -------------------------------------------
+// Self-contained hover panel: its own open state and a position:fixed panel
+// (anchored to the trigger's rect) so it works regardless of whether the slot
+// sits inside a Radix TooltipProvider, and escapes any overflow clipping on
+// the top bar. Clicking the pill also toggles it, so nothing required is
+// hover-only.
+function makeTopBarBalance(host) {
+  var React = host.React;
+  var h = host.jsx;
+  var ui = host.ui;
+
+  return function TopBarBalance(props) {
+    var ctx = (props && props.slotProps) || {};
+    var workspaceId = ctx.workspaceId || "";
+
+    var stateHook = React.useState({ data: null, error: null });
+    var state = stateHook[0];
+    var setState = stateHook[1];
+    var openHook = React.useState(false);
+    var open = openHook[0];
+    var setOpen = openHook[1];
+    var posHook = React.useState({ top: 0, left: 0 });
+    var pos = posHook[0];
+    var setPos = posHook[1];
+    var refreshingHook = React.useState(false);
+    var refreshing = refreshingHook[0];
+    var setRefreshing = refreshingHook[1];
+    var wrapRef = React.useRef(null);
+    var closeTimer = React.useRef(null);
+
+    // fetchBalance reads the balance.get action. A forced refresh travels in
+    // the action body ({ refresh: true }); the silent path sends no body so it
+    // serves the backend's cached snapshot. A rejection (non-2xx, host 504,
+    // transport) is a transient error: the last-known render is kept and the
+    // next interval or Refresh retries — the backend always answers 200 with
+    // body-encoded domain errors.
+    function fetchBalance(opts) {
+      opts = opts || {};
+      var input = { workspaceId: workspaceId };
+      if (opts.refresh) {
+        input.body = { refresh: true };
+        setRefreshing(true);
+      }
+      host.api
+        .invokeAction("balance.get", input)
+        .then(function (data) {
+          setRefreshing(false);
+          setState({ data: data, error: null });
+        })
+        .catch(function () {
+          setRefreshing(false);
+          setState(function (s) { return { data: s.data, error: true }; });
+        });
+    }
+
+    function load(force) {
+      if (!workspaceId) return; // workspace-scoped action: no workspace, no fetch
+      fetchBalance({ refresh: !!force });
+    }
+
+    React.useEffect(function () {
+      load(false);
+    }, [workspaceId]);
+
+    // Keep the pill / open panel in step with the backend poller by silently
+    // re-reading the warm snapshot on an interval (no body, no forced
+    // rebuild).
+    React.useEffect(function () {
+      if (!workspaceId) return;
+      var id = setInterval(function () { fetchBalance({}); }, AUTO_REFRESH_MS);
+      activeIntervals.add(id);
+      return function () {
+        clearInterval(id);
+        activeIntervals.delete(id);
+      };
+    }, [workspaceId]);
+
+    function reposition() {
+      var el = wrapRef.current;
+      if (!el || !el.getBoundingClientRect) return;
+      var r = el.getBoundingClientRect();
+      // No vertical gap: the fixed container starts at the trigger's bottom
+      // and bridges to the card with transparent padding, so the mouse never
+      // leaves the hover area on the way down.
+      setPos(usagePopoverPosition(r, window.innerWidth, window.innerHeight, "below"));
+    }
+    function cancelClose() {
+      if (closeTimer.current) {
+        clearTimeout(closeTimer.current);
+        closeTimer.current = null;
+      }
+    }
+    function openNow() {
+      cancelClose();
+      reposition();
+      setOpen(true);
+      load(false);
+    }
+    function scheduleClose() {
+      cancelClose();
+      closeTimer.current = setTimeout(function () { setOpen(false); }, 260);
+    }
+    function toggle() {
+      if (open) {
+        setOpen(false);
+      } else {
+        openNow();
+      }
+    }
+
+    // No workspace selector: render nothing and issue no fetch (a workspace-
+    // scoped action with no selector would be rejected with 400 and retried).
+    if (!workspaceId) return null;
+
+    var d = state.data;
 
     return h(
       "div",
-      { className: "p-4 max-w-2xl" },
+      { ref: wrapRef, style: { display: "inline-flex" }, onMouseEnter: openNow, onMouseLeave: scheduleClose },
       h(
-        Card,
-        null,
-        h(
-          CardHeader,
-          null,
-          h(CardTitle, { id: "template-page-title" }, "Template plugin"),
-          h(CardDescription, null, `The ${RECENT_LIMIT} most recent tasks created since this page loaded`),
-          h(CardAction, null, h(AboutPopover)),
-        ),
-        h(
-          CardContent,
-          null,
-          // host.ui.Progress takes a 0-100 value. Used here for what it is
-          // actually good at: a bounded ratio. Don't reach for it to fake an
-          // indeterminate spinner — host.ui.Spinner is that.
-          h(
-            "div",
-            { className: "mb-4" },
-            h(Progress, { id: "template-page-progress", value: (tasks.length / RECENT_LIMIT) * 100 }),
-            h(
-              "p",
-              {
-                // host.utils.cn is the host's own clsx + tailwind-merge
-                // combiner, so conditional classes merge the same way they do
-                // in the components they sit next to.
-                className: utils.cn(
-                  "mt-2 text-xs",
-                  isEmpty ? "text-muted-foreground/60" : "text-muted-foreground",
-                ),
-              },
-              `buffer ${tasks.length} of ${RECENT_LIMIT}`,
-            ),
-          ),
-          isEmpty ? h(EmptyState) : h(RecentTasksTable, { tasks }),
-          h(
-            "div",
-            { className: "mt-4 flex justify-end" },
-            h(
-              Button,
-              {
-                id: "template-page-clear",
-                type: "button",
-                variant: "outline",
-                size: "sm",
-                onClick: onClear,
-              },
-              "Clear",
-            ),
-          ),
-        ),
+        ui.Button,
+        {
+          id: TOPBAR_ID,
+          type: "button",
+          variant: "outline",
+          size: "sm",
+          className: "h-6 gap-1.5 px-2 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground",
+          "aria-label": "DeepSeek Credits balance",
+          onFocus: openNow,
+          onClick: toggle,
+        },
+        pillContent(h, d),
       ),
+      open
+        ? h(
+            "div",
+            {
+              onMouseEnter: cancelClose,
+              onMouseLeave: scheduleClose,
+              style: { position: "fixed", top: pos.top + "px", left: pos.left + "px", zIndex: 9999, paddingTop: "8px" },
+            },
+            h(
+              ui.Card,
+              { style: { padding: "13px 14px", boxShadow: "0 10px 28px rgba(15,20,40,0.20)", width: PANEL_WIDTH + "px" } },
+              panelBody(h, ui, host, d, refreshing, function () { load(true); }),
+            ),
+          )
+        : null,
     );
   };
 }
 
-// ---------------------------------------------------------------------------
-// A component for the "chat-input-actions" slot: an icon button rendered in
-// the chat composer toolbar, beside the model picker, mic, and send. The host
-// passes { sessionId, taskId, taskTitle } as slotProps, so the button knows
-// which task/session the user is looking at.
-// ---------------------------------------------------------------------------
-function makeChatToolbarAction(host) {
-  const { jsx: h, ui } = host;
-  const { Button, Tooltip, TooltipTrigger, TooltipContent } = ui;
-
-  return function ChatToolbarAction({ slotProps }) {
-    const ctx = slotProps || {};
-    const label = ctx.taskTitle || ctx.taskId;
-    const tooltip = label ? `Template — open page (task: ${label})` : "Template — open page";
-
-    // A plain Tooltip needs no provider of your own: the app shell mounts one,
-    // and host.openModal content gets its own, so this works inside a plugin
-    // modal too. host.ui.TooltipProvider is exported only for when you want a
-    // custom delayDuration over a dense cluster of tooltips.
-    return h(
-      Tooltip,
-      null,
-      h(
-        TooltipTrigger,
-        { asChild: true },
-        h(
-          Button,
-          {
-            id: "template-chat-action",
-            type: "button",
-            variant: "ghost",
-            size: "icon",
-            className: "h-7 w-7 cursor-pointer hover:bg-muted/40",
-            "aria-label": tooltip,
-            onClick: () => host.navigate("/template"),
-          },
-          icon(h, STAR_PATH),
-        ),
-      ),
-      h(TooltipContent, null, tooltip),
-    );
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Registration. Keep only what your plugin uses.
-// ---------------------------------------------------------------------------
-window.registerKandevPlugin("kandev-plugin-template", {
-  initialize(registry, host) {
-    // A sidebar entry. `icon` is a curated host icon name; it also becomes the
-    // default topbar icon for the route registered on the same path.
-    registry.registerNavItem({
-      id: "template",
-      label: "Template",
-      path: "/template",
-      icon: "puzzle",
-      section: "main",
-    });
-
-    // A native route. The topbar title/icon default to the nav item above;
-    // here we add a subtitle. Pass { topbar: false } to own the whole page
-    // chrome yourself (host.ui.PageTopbar is available for that).
-    registry.registerRoute("/template", makePluginPage(host), {
-      topbar: { subtitle: "A starter kandev plugin page" },
-    });
-
-    // A WS handler: fires for every task.created message the SPA receives,
-    // regardless of which component is mounted, since the buffer lives at
-    // module scope. Register handlers only for events you actually use.
-    registry.registerWsHandler("task.created", recordTask);
-
-    // A chat-composer toolbar button.
-    registry.registerComponent("chat-input-actions", makeChatToolbarAction(host));
+// ==========================================================================
+window.registerKandevPlugin("kandev-deepseek-credits", {
+  initialize: function (registry, host) {
+    injectTopbarStyles();
+    registry.registerComponent("chat-top-bar", makeTopBarBalance(host));
   },
-
-  destroy() {
-    // The host bulk-unregisters everything under this plugin's id; reset local
-    // module state too so a re-enable starts clean.
-    publishRecentTasks([]);
-    recentListeners.clear();
+  destroy: function () {
+    activeIntervals.forEach(clearInterval);
+    activeIntervals.clear();
+    removeTopbarStyles();
   },
 });

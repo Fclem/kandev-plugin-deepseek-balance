@@ -111,7 +111,7 @@ jobs:
           set -euo pipefail
           sed -i -E "s/^version: \"[0-9]+\.[0-9]+\.[0-9]+\"$/version: \"$VERSION\"/" manifest.yaml
           sed -i -E "s/^VERSION := [0-9]+\.[0-9]+\.[0-9]+$/VERSION := $VERSION/" Makefile
-          sed -i -E "s/kandev-plugin-template-[0-9]+\.[0-9]+\.[0-9]+\.tar\.gz/kandev-plugin-template-$VERSION.tar.gz/" README.md
+          sed -i -E "s/kandev-deepseek-credits-[0-9]+\.[0-9]+\.[0-9]+\.tar\.gz/kandev-deepseek-credits-$VERSION.tar.gz/" README.md
 
           RANGE="${PREVIOUS_TAG:+$PREVIOUS_TAG..}HEAD"
           CHANGES="$(git log --no-merges --format='- %s (%h)' "$RANGE")"
@@ -180,12 +180,6 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: plugin/package-lock.json
-
-      - name: Install recipe test dependencies
-        working-directory: plugin
-        run: npm ci --ignore-scripts
 
       - name: Verify
         working-directory: plugin
@@ -193,7 +187,6 @@ jobs:
           test -z "$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
           make vet
           make test
-          make audit-recipes
 
       - name: Package and validate all platforms
         working-directory: plugin
@@ -201,13 +194,13 @@ jobs:
 
       - name: Extract checksums
         working-directory: plugin
-        run: tar -xzf kandev-plugin-template-*.tar.gz checksums.txt
+        run: tar -xzf kandev-deepseek-credits-*.tar.gz checksums.txt
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ github.event_name == 'push' && github.ref_name || needs.prepare.outputs.tag }}
           files: |
-            plugin/kandev-plugin-template-*.tar.gz
+            plugin/kandev-deepseek-credits-*.tar.gz
             plugin/checksums.txt
           generate_release_notes: true

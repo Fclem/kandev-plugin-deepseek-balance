@@ -1,12 +1,13 @@
-.PHONY: build run test test-backend test-recipes typecheck-recipes audit-recipes \
+.PHONY: build run test test-backend \
 	fmt vet package package-host verify-package verify-package-host clean
+.PHONY: test-bundle
 
 # When you rename the plugin, update BIN and VERSION to match manifest.yaml's
 # id and version (PKG_OUT is derived from them).
-BIN := bin/kandev-plugin-template
+BIN := bin/kandev-deepseek-credits
 VERSION := 0.1.0
 STAGE := .build/stage
-PKG_OUT := kandev-plugin-template-$(VERSION).tar.gz
+PKG_OUT := kandev-deepseek-credits-$(VERSION).tar.gz
 
 # The sibling kandev checkout the `replace` in go.mod points at (see README,
 # "Developing against the SDK"). The packaging step runs plugin-pack from
@@ -32,25 +33,20 @@ build:
 run: build
 	./$(BIN)
 
-test: test-backend typecheck-recipes test-recipes
+test: test-backend test-bundle
 
 test-backend:
-	go test ./server/... ./recipes/source-control/server/...
+	go test ./server/...
 
-test-recipes:
-	npm run test:recipes
-
-typecheck-recipes:
-	npm run typecheck:recipes
-
-audit-recipes:
-	npm audit --audit-level=high
+test-bundle:
+	node --check ui/bundle.js
+	node --test test/bundle.test.mjs
 
 fmt:
-	gofmt -l .
+	test -z "$$(gofmt -l .)"
 
 vet:
-	go vet ./server/... ./recipes/source-control/server/...
+	go vet ./server/...
 
 ## Cross-compile server/plugin-<goos>-<goarch>[.exe] for every platform in
 ## manifest.yaml's runtime.executables, stage manifest.yaml + ui/ alongside
@@ -124,4 +120,4 @@ verify-package-host: package-host
 		fi
 
 clean:
-	rm -rf bin $(STAGE) kandev-plugin-template-*.tar.gz
+	rm -rf bin $(STAGE) kandev-deepseek-credits-*.tar.gz
