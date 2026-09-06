@@ -217,6 +217,11 @@ function mount(react, component, { slotProps, rect }) {
     return ctx.tree;
   }
 
+  function updateSlotProps(nextSlotProps) {
+    ctx.props = { slotProps: nextSlotProps };
+    render();
+  }
+
   function unmount() {
     ctx.mounted = false;
     ctx.effects.forEach((e) => {
@@ -228,7 +233,7 @@ function mount(react, component, { slotProps, rect }) {
   }
 
   render();
-  return { tree: () => ctx.tree, render, unmount, react };
+  return { tree: () => ctx.tree, render, updateSlotProps, unmount, react };
 }
 
 // ---------------------------------------------------------------------------
@@ -905,6 +910,21 @@ test("destroy clears a pending prompt close timer", async () => {
   mounted.unmount();
 });
 
+test("destroy blocks post-teardown events and prop-change timers", async () => {
+  const { plugin, intervals, timeouts } = loadPlugin();
+  const { mounted, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
+  await resolveAction(0, okData());
+
+  const wrap = everyElement(mounted.tree(), (n) => n.type === "div" && typeof n.props.onMouseLeave === "function")[0];
+  plugin.destroy();
+  wrap.props.onMouseLeave();
+  mounted.updateSlotProps({ workspaceId: "ws-2" });
+
+  assert.equal(timeouts.size, 0, "post-destroy events cannot schedule close timers");
+  assert.equal(intervals.size, 0, "post-destroy prop changes cannot add intervals");
+  mounted.unmount();
+});
+
 // ---------------------------------------------------------------------------
 // Pure helper contracts
 // ---------------------------------------------------------------------------
@@ -933,4 +953,10 @@ test("usagePopoverPosition anchors below the trigger and clamps to the viewport"
 
   const above = { ...usagePopoverPosition({ top: 700, right: 300, bottom: 728 }, 1440, 900, "above") };
   assert.deepEqual(above, { bottom: 200, left: 28 });
+
+  const promptNearTop = { ...usagePopoverPosition({ top: 20, right: 300, bottom: 48 }, 1440, 900, "above") };
+  assert.deepEqual(promptNearTop, { top: 48, left: 28 }, "prompt flips below when above space is insufficient");
+
+  const topbarNearBottom = { ...usagePopoverPosition({ top: 820, right: 300, bottom: 848 }, 1440, 900, "below") };
+  assert.deepEqual(topbarNearBottom, { bottom: 80, left: 28 }, "topbar flips above when below space is insufficient");
 });
