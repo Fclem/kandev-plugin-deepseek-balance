@@ -1,4 +1,4 @@
-// Package main implements the kandev-deepseek-credits plugin backend: a
+// Package main implements the kandev-plugin-deepseek-balance plugin backend: a
 // warm-snapshot poller for DeepSeek's GET /user/balance plus the
 // authenticated, workspace-scoped `balance.get` action. The action is the
 // ONLY data path — the manifest declares no webhooks and no capabilities, so
@@ -19,10 +19,13 @@ import (
 )
 
 const (
-	actionKeyBalanceGet  = "balance.get"
-	configKeyAPIKey      = "api_key"
-	configKeyPollMinutes = "poll_minutes"
-	configKeyWarnBelow   = "warn_below"
+	actionKeyBalanceGet          = "balance.get"
+	actionKeyBalanceGetTask      = "balance.get.task"
+	configKeyAPIKey              = "api_key"
+	configKeyPollMinutes         = "poll_minutes"
+	configKeyWarnBelow           = "warn_below"
+	configKeyDisplayTaskTopRight = "display_task_top_right"
+	configKeyDisplayPromptInput  = "display_prompt_input"
 
 	envAPIKey = "DEEPSEEK_API_KEY"
 
@@ -249,11 +252,35 @@ func balanceErrorOf(err error) *BalanceError {
 // never HTTP statuses (the host forwards plugin statuses verbatim and the
 // UI's fetchJson throws on non-2xx).
 func (p *plugin) HandleAction(ctx context.Context, req *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
-	if req == nil || req.ActionKey != actionKeyBalanceGet {
+	if req == nil || (req.ActionKey != actionKeyBalanceGet && req.ActionKey != actionKeyBalanceGetTask) {
 		return jsonActionResponse(404, []byte(`{"error":"unknown plugin action"}`)), nil
 	}
 	refresh := parseRefresh(req.Body)
-	return jsonActionResponse(200, p.balanceResponse(ctx, refresh)), nil
+	body := p.balanceResponse(ctx, refresh)
+	return jsonActionResponse(200, p.addDisplayOptions(ctx, body)), nil
+}
+
+func (p *plugin) addDisplayOptions(ctx context.Context, body []byte) []byte {
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		return body
+	}
+	config := p.readConfig(ctx)
+	response[configKeyDisplayTaskTopRight] = boolConfig(config[configKeyDisplayTaskTopRight], true)
+	response[configKeyDisplayPromptInput] = boolConfig(config[configKeyDisplayPromptInput], false)
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		return body
+	}
+	return encoded
+}
+
+func boolConfig(value any, fallback bool) bool {
+	enabled, ok := value.(bool)
+	if !ok {
+		return fallback
+	}
+	return enabled
 }
 
 // balanceResponse builds the action body for the current state.
@@ -347,7 +374,7 @@ func (p *plugin) readConfig(ctx context.Context) map[string]any {
 	}
 	cfg, err := host.GetConfig(ctx)
 	if err != nil {
-		log.Printf("kandev-deepseek-credits: reading plugin config: %v", err)
+		log.Printf("kandev-plugin-deepseek-balance: reading plugin config: %v", err)
 		return map[string]any{}
 	}
 	return cfg
@@ -368,6 +395,7 @@ func apiKey(cfg map[string]any) string {
 		if k := strings.TrimSpace(v); k != "" {
 			return k
 		}
+		return strings.TrimSpace(os.Getenv(envAPIKey))
 	}
 	return strings.TrimSpace(os.Getenv(envAPIKey))
 }

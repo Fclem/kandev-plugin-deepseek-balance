@@ -1,26 +1,10 @@
-# kandev-deepseek-credits
+# DeepSeek API Balance for Kandev
 
-DeepSeek API balance and remaining credits in the session top bar, as an
-official [kandev](https://github.com/kdlbs/kandev) **native-UI plugin** — its
-own git repo, packaged into a versioned tarball and installed against a
-running kandev instance.
+Native [Kandev](https://github.com/kdlbs/kandev) plugin that shows DeepSeek API balance and credit breakdown in the task top bar or prompt toolbar.
 
-A pill in the session top bar (beside the CPU/DB metrics) shows the account's
-remaining DeepSeek balance — a DeepSeek monogram chip plus the formatted total
-of the primary currency, e.g. `¥104.32` or `$5.20`. Hovering the pill
-(desktop) or clicking/tapping it (all surfaces) opens a panel with the full
-breakdown: total, granted/topped-up components, every currency entry,
-`is_available` status, last-updated time, and a Refresh control. The pill
-turns amber below the `warn_below` threshold and muted coral while DeepSeek
-reports `is_available: false`.
+The compact balance pill shows the primary currency total. Hovering, focusing, or clicking it opens details for total, granted, topped-up, every currency entry, availability, last update, and refresh.
 
-The balance comes from DeepSeek's `GET /user/balance` endpoint using the
-operator's DeepSeek API key — from the plugin settings (`api_key`, a
-`secret: true` vault-stored field) or, when unset, from the
-`DEEPSEEK_API_KEY` environment variable the plugin subprocess inherits from
-kandev. Data reaches the UI only through the authenticated, workspace-scoped
-`balance.get` action; the plugin declares no webhooks, so no balance data is
-reachable over an unauthenticated route.
+The balance comes from DeepSeek's `GET /user/balance` endpoint. The configured `api_key` is stored as a Kandev secret; when unset, the plugin uses `DEEPSEEK_API_KEY`. Data reaches the UI only through the authenticated, workspace-scoped `balance.get` action.
 
 ## Layout
 
@@ -57,7 +41,7 @@ monorepo:
 ```
 some-dir/
 ├── kandev/                   # https://github.com/kdlbs/kandev, Go module at apps/backend/
-└── kandev-plugin-deepseek-credits/   # this repo
+└── kandev-plugin-deepseek-balance/   # this repo
 ```
 
 Note the module root is `kandev/apps/backend`, not the repo root — `kandev` is
@@ -76,26 +60,16 @@ make vet                 # go vet ./server/...
 make verify-package-host # validate a host-only tarball and checksums
 ```
 
-> Note: bare `go build ./server/...` (no `-o`) fails with `build output
-> "server" already exists and is a directory` — Go's default output name for a
-> lone main package is the last path element ("server"), which collides with
-> the `server/` source directory. Always pass `-o`, run `go build .` from
-> inside `server/`, or use `make build`. `go vet`/`go test` are unaffected.
-
-## Package it
+Install `kandev-plugin-deepseek-balance-0.1.0.tar.gz` through **Settings → Plugins → Install plugin**, or with the operator API:
 
 ```sh
-make package        # cross-compiles linux/darwin (amd64+arm64) + windows/amd64,
-                    # then packs manifest + ui/ + binaries into a versioned .tar.gz
-
-make package-host   # host platform only — faster local iteration
-make verify-package # build + validate the five-platform archive
+curl -F package=@kandev-plugin-deepseek-balance-0.1.0.tar.gz \
+  http://localhost:8080/api/plugins/install
 ```
 
-Both stage `manifest.yaml` + `ui/` alongside the freshly built
-`server/plugin-<goos>-<goarch>[.exe]` binaries, then pack the tree with
-kandev's `cmd/plugin-pack`, which computes `checksums.txt` and writes the
-tarball.
+Kandev verifies the archive's internal `checksums.txt`, validates the manifest, and starts the binary matching the host platform.
+
+## Configure
 
 Note the Makefile runs `plugin-pack` with `cd $(KANDEV_SDK) && go run
 ./cmd/plugin-pack`, from inside the sibling kandev checkout, rather than as
@@ -107,29 +81,18 @@ entry`. Pulling them in would force this repo's `go.sum` to track every
 dependency the kandev backend grows. Building the tool where it lives keeps
 `go.sum` scoped to what your plugin actually imports.
 
-## Install it against a running kandev
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| **DeepSeek API key** | empty | Secret used only by the plugin backend for `GET https://api.deepseek.com/user/balance`. |
+| **Display · Task top right** | enabled | Shows the balance pill in the task session top bar. |
+| **Display · Prompt input** | disabled | Shows the balance action beside Send in the prompt toolbar. |
 
-Either through the UI (**Settings > Plugins > Install plugin**, URL or file
-upload), or directly:
-
-```sh
-curl -F package=@kandev-deepseek-credits-0.1.0.tar.gz \
-  http://localhost:<kandev-port>/api/plugins/install
-```
-
-kandev verifies `checksums.txt`, validates the manifest, extracts the package,
-spawns the host-matching binary, and — once the go-plugin handshake completes —
-marks the plugin active. Sideloaded plugins register **disabled/unverified**;
-enable yours in **Settings > Plugins** (the `plugins` feature flag must be on).
-Reinstalling the same version returns 409 — bump `version` in `manifest.yaml`
-(and the lockstep `VERSION` in the Makefile).
+Both display settings may be enabled simultaneously. The API key never reaches the browser.
 
 ## Minimum host version
 
-`manifest.yaml` declares `min_kandev_version: "0.88.0"` — the first release
-carrying authenticated plugin actions (`pluginsdk.HandleAction`, PR #2117),
-which this plugin's `balance.get` action requires. A release host compares it
-against its own version at install time and refuses an older one.
+`manifest.yaml` declares `min_kandev_version: "0.88.0"`, the first release carrying authenticated plugin actions required by this plugin.
+
 
 ## How a plugin runs (gRPC subprocess, not HTTP)
 
@@ -161,3 +124,17 @@ next SemVer, updates `manifest.yaml` / `Makefile` / `README.md` /
 `CHANGELOG.md`, tags the release commit, builds the five-platform tarball with
 `make verify-package`, and publishes the tarball + checksums as a GitHub
 Release.
+
+## Submit to Kandev's official marketplace
+
+After merging this repository and publishing a GitHub Release containing `kandev-plugin-deepseek-balance-<version>.tar.gz` plus `checksums.txt`, fork [`kdlbs/kandev`](https://github.com/kdlbs/kandev) and add:
+
+```yaml
+- id: kandev-plugin-deepseek-balance
+  repo: Fclem/kandev-plugin-deepseek-balance
+  categories: [analytics]
+```
+
+Open a PR against `plugin-registry/plugins.yaml`. Maintainers validate the release asset, manifest ID, package checksums, and metadata before inclusion. Marketplace curation does not make this a first-party plugin; keep `author: "Fclem"` unless Kandev maintainers transfer the repository to `kdlbs`.
+
+See the [marketplace publishing guide](https://github.com/kdlbs/kandev/blob/main/docs/public/plugins-marketplace.md#publishing-a-plugin).

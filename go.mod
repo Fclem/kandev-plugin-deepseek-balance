@@ -1,4 +1,4 @@
-module kandev-plugin-deepseek-credits
+module kandev-plugin-deepseek-balance
 
 go 1.26.0
 
