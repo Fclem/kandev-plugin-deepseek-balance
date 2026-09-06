@@ -43,14 +43,16 @@ vet:
 	go vet ./server/...
 
 ## Cross-compile server/plugin-<goos>-<goarch>[.exe] for every platform in
-## manifest.yaml's runtime.executables, stage manifest.yaml + ui/ alongside
-## them, and pack the tree into $(PKG_OUT) with
-## github.com/kandev/kandev/cmd/plugin-pack (resolved via the `replace` in
-## go.mod). Install the tarball via Settings > Plugins or curl -F package=@...
+## manifest.yaml's runtime.executables, stage manifest.yaml + ui/ + assets/
+## alongside them, and pack the tree into $(PKG_OUT) with
+## github.com/kandev/kandev/cmd/plugin-pack (resolved via the
+## `replace` in go.mod). Install the tarball via Settings > Plugins or curl
+## -F package=@...
 package:
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/server
 	cp manifest.yaml $(STAGE)/manifest.yaml
+	cp -r assets $(STAGE)/assets
 	cp -r ui $(STAGE)/ui
 	GOOS=linux   GOARCH=amd64 go build -o $(STAGE)/server/plugin-linux-amd64       ./server
 	GOOS=linux   GOARCH=arm64 go build -o $(STAGE)/server/plugin-linux-arm64       ./server
@@ -67,6 +69,7 @@ package-host:
 	rm -rf $(STAGE)
 	mkdir -p $(STAGE)/server
 	cp manifest.yaml $(STAGE)/manifest.yaml
+	cp -r assets $(STAGE)/assets
 	cp -r ui $(STAGE)/ui
 	go build -o $(STAGE)/server/plugin-$$(go env GOOS)-$$(go env GOARCH)$$(go env GOEXE) ./server
 	cd $(KANDEV_SDK) && go run ./cmd/plugin-pack -dir $(CURDIR)/$(STAGE) -out $(CURDIR)/$(PKG_OUT) -platform-only
@@ -81,6 +84,7 @@ verify-package: package
 		tar -xzf "$(PKG_OUT)" -C "$$tmp"; \
 		test -f "$$tmp/manifest.yaml"; \
 		test -f "$$tmp/ui/bundle.js"; \
+		test -f "$$tmp/assets/deepseek.svg"; \
 		test -f "$$tmp/checksums.txt"; \
 		for executable in \
 			plugin-linux-amd64 plugin-linux-arm64 \
@@ -103,6 +107,7 @@ verify-package-host: package-host
 		host_executable="plugin-$$(go env GOOS)-$$(go env GOARCH)$$(go env GOEXE)"; \
 		test -f "$$tmp/manifest.yaml"; \
 		test -f "$$tmp/ui/bundle.js"; \
+		test -f "$$tmp/assets/deepseek.svg"; \
 		test -f "$$tmp/checksums.txt"; \
 		test -f "$$tmp/server/$$host_executable"; \
 		test ! -e "$$tmp/recipes"; \
