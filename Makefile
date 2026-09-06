@@ -9,16 +9,10 @@ VERSION := 0.1.0
 STAGE := .build/stage
 PKG_OUT := kandev-deepseek-credits-$(VERSION).tar.gz
 
-# The sibling kandev checkout the `replace` in go.mod points at (see README,
-# "Developing against the SDK"). The packaging step runs plugin-pack from
-# INSIDE this directory, i.e. in kandev's own module context, rather than as
-# `go run github.com/kandev/kandev/cmd/plugin-pack` from here. Both spellings
-# work, but the second resolves plugin-pack's dependencies against *this*
-# module's go.sum — and plugin-pack imports far more of the kandev backend
-# than server/ does, so those entries are absent and packaging dies with
-# "missing go.sum entry". Adding them would mean this template's go.sum has to
-# track every dependency the kandev backend grows, which `go mod tidy` then
-# fights over. Building it where it lives sidesteps all of that.
+# The sibling kandev checkout the `replace` in go.mod points at. Packaging runs
+# plugin-pack inside kandev's module because the tool imports substantially more
+# backend code than this plugin does. That keeps those transitive dependencies
+# out of the plugin's go.sum.
 KANDEV_SDK := ../kandev/apps/backend
 
 ## Build the plugin binary for the host platform (development use). kandev

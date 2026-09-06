@@ -76,26 +76,14 @@ make vet                 # go vet ./server/...
 make verify-package-host # validate a host-only tarball and checksums
 ```
 
-> Note: bare `go build ./server/...` (no `-o`) fails with `build output
-> "server" already exists and is a directory` — Go's default output name for a
-> lone main package is the last path element ("server"), which collides with
-> the `server/` source directory. Always pass `-o`, run `go build .` from
-> inside `server/`, or use `make build`. `go vet`/`go test` are unaffected.
-
-## Package it
+Install `kandev-plugin-deepseek-credits-0.1.0.tar.gz` through **Settings → Plugins → Install plugin**, or with the operator API:
 
 ```sh
-make package        # cross-compiles linux/darwin (amd64+arm64) + windows/amd64,
-                    # then packs manifest + ui/ + binaries into a versioned .tar.gz
-
-make package-host   # host platform only — faster local iteration
-make verify-package # build + validate the five-platform archive
+curl -F package=@kandev-plugin-deepseek-credits-0.1.0.tar.gz \
+  http://localhost:8080/api/plugins/install
 ```
 
-Both stage `manifest.yaml` + `ui/` alongside the freshly built
-`server/plugin-<goos>-<goarch>[.exe]` binaries, then pack the tree with
-kandev's `cmd/plugin-pack`, which computes `checksums.txt` and writes the
-tarball.
+## Configure
 
 Note the Makefile runs `plugin-pack` with `cd $(KANDEV_SDK) && go run
 ./cmd/plugin-pack`, from inside the sibling kandev checkout, rather than as
@@ -107,10 +95,24 @@ entry`. Pulling them in would force this repo's `go.sum` to track every
 dependency the kandev backend grows. Building the tool where it lives keeps
 `go.sum` scoped to what your plugin actually imports.
 
-## Install it against a running kandev
+If the plugin setting is empty, the backend uses `DEEPSEEK_API_KEY` from its process environment when available.
 
-Either through the UI (**Settings > Plugins > Install plugin**, URL or file
-upload), or directly:
+Display options:
+
+- **Display · Task top right** is enabled by default and shows the current top-bar pill.
+- **Display · Prompt input** is disabled by default and shows the same balance next to the prompt send button.
+
+Both options may be enabled at the same time.
+
+The balance webhook requires an authenticated Kandev identity. API keys and upstream response bodies are never returned to the browser or included in plugin errors.
+
+## Planned credential discovery
+
+The proposed post-install search for existing DeepSeek keys from OMP, Pi, OpenCode, and other verified coding clients is documented in [Credential discovery design](docs/credential-discovery.md). It is intentionally not implemented in this release.
+
+## Develop
+
+The Go module expects a sibling Kandev checkout at `../kandev` because the plugin SDK is not yet published as a standalone module.
 
 ```sh
 curl -F package=@kandev-deepseek-credits-0.1.0.tar.gz \

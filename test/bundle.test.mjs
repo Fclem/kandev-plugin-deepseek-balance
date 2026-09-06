@@ -37,7 +37,6 @@ function byType(tree, type) {
 function byId(tree, id) {
   return everyElement(tree, (node) => node.props.id === id);
 }
-
 function renderedText(node) {
   if (Array.isArray(node)) return node.map(renderedText).join("");
   if (node == null || typeof node === "boolean") return "";
