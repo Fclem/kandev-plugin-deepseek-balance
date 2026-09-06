@@ -22,6 +22,7 @@ var AUTO_REFRESH_MS = 60 * 1000;
 var TOPBAR_STYLE_ID = "kandev-plugin-deepseek-balance-topbar-style";
 var TOPBAR_ID = "deepseek-credits-topbar";
 var PROMPT_ID = "deepseek-credits-prompt-action";
+var CONFIG_SETTINGS_HREF = "/settings/plugins/kandev-plugin-deepseek-balance";
 var PANEL_WIDTH = 272;
 
 var TOPBAR_CSS =
@@ -208,6 +209,26 @@ function panelRow(h, label, value) {
   );
 }
 
+function settingsLink(h, host) {
+  return h(
+    "a",
+    {
+      href: CONFIG_SETTINGS_HREF,
+      style: {
+        color: "var(--muted-foreground)",
+        textDecoration: "underline",
+        textUnderlineOffset: "2px",
+        cursor: "pointer",
+      },
+      onClick: function (event) {
+        event.preventDefault();
+        host.navigate(CONFIG_SETTINGS_HREF);
+      },
+    },
+    "Settings → Plugins → DeepSeek API Balance",
+  );
+}
+
 // panelBody renders the panel content for the current action response.
 function panelBody(h, ui, host, d, refreshing, onRefresh) {
   var status = d ? d.status : "loading";
@@ -228,7 +249,9 @@ function panelBody(h, ui, host, d, refreshing, onRefresh) {
         { style: { fontSize: "12px", lineHeight: 1.5, color: "var(--muted-foreground)" } },
         "No API key configured.",
         h("br"),
-        "Set it in Settings → Plugins → DeepSeek API Balance, or provide the DEEPSEEK_API_KEY environment variable.",
+        "Set it in ",
+        settingsLink(h, host),
+        ", or provide the DEEPSEEK_API_KEY environment variable.",
       ),
     );
   } else if (status === "loading") {
@@ -298,7 +321,9 @@ function panelBody(h, ui, host, d, refreshing, onRefresh) {
       if (!hasBalance) {
         body.push(
           h("div", { style: { fontSize: "12px", lineHeight: 1.5, color: "var(--muted-foreground)", marginTop: "4px" } },
-            "Check the key in Settings → Plugins → DeepSeek API Balance, or the DEEPSEEK_API_KEY environment variable."),
+            "Check the key in ",
+            settingsLink(h, host),
+            ", or the DEEPSEEK_API_KEY environment variable."),
         );
       }
     }

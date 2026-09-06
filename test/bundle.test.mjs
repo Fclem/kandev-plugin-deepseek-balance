@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
+const CONFIG_SETTINGS_HREF = "/settings/plugins/kandev-plugin-deepseek-balance";
 
 function bundleSource() {
   return readFileSync(new URL("../ui/bundle.js", import.meta.url), "utf8");
@@ -84,6 +85,7 @@ function makeDocument() {
 function makeHost(overrides) {
   const actionDeferreds = [];
   const actionCalls = [];
+  const navigateCalls = [];
   const host = {
     jsx: element,
     ui: { Button: "Button", Card: "Card" },
@@ -95,6 +97,9 @@ function makeHost(overrides) {
         return d.promise;
       },
     },
+    navigate(href) {
+      navigateCalls.push(href);
+    },
     utils: {
       formatRelativeTime: (v) => "updated:" + String(v),
     },
@@ -103,6 +108,7 @@ function makeHost(overrides) {
   return {
     host,
     actionCalls,
+    navigateCalls,
     resolveAction(i, data) {
       actionDeferreds[i].resolve(data);
       return flushMicrotasks();
@@ -480,9 +486,9 @@ test("neutral checking state before the first snapshot", async () => {
   assert.equal(loading.length, 1, "loading state marked on the monogram");
 });
 
-test("unconfigured guidance renders in the panel", async () => {
+test("unconfigured guidance links to plugin settings", async () => {
   const { plugin } = loadPlugin();
-  const { mounted, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
+  const { mounted, resolveAction, navigateCalls } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
   await resolveAction(0, {
     status: "unconfigured",
     error: null,
@@ -498,6 +504,13 @@ test("unconfigured guidance renders in the panel", async () => {
   assert.match(panelText, /No API key configured\./);
   assert.match(panelText, /Settings → Plugins → DeepSeek API Balance/);
   assert.match(panelText, /DEEPSEEK_API_KEY/);
+
+  const links = everyElement(tree, (node) => node.type === "a" && node.props.href === CONFIG_SETTINGS_HREF);
+  assert.equal(links.length, 1, "configuration guidance has one settings link");
+  let defaultPrevented = false;
+  links[0].props.onClick({ preventDefault: () => { defaultPrevented = true; } });
+  assert.equal(defaultPrevented, true, "settings link uses SPA navigation");
+  assert.deepEqual(navigateCalls, [CONFIG_SETTINGS_HREF]);
 });
 
 test("loading state renders checking text in the panel", async () => {
@@ -508,7 +521,7 @@ test("loading state renders checking text in the panel", async () => {
   assert.match(renderedText(tree), /Checking balance…/);
 });
 
-test("status error with no snapshot renders neutral unavailable and the reason", async () => {
+test("status error with no snapshot links to plugin settings", async () => {
   const { plugin } = loadPlugin();
   const { mounted, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
   await resolveAction(0, {
@@ -528,6 +541,9 @@ test("status error with no snapshot renders neutral unavailable and the reason",
   const panelText = renderedText(tree);
   assert.match(panelText, /DeepSeek rejected the API key \(401\)/);
   assert.match(panelText, /Settings → Plugins → DeepSeek API Balance/);
+
+  const links = everyElement(tree, (node) => node.type === "a" && node.props.href === CONFIG_SETTINGS_HREF);
+  assert.equal(links.length, 1, "error guidance has one settings link");
 });
 
 test("error keeps the last-known render", async () => {
