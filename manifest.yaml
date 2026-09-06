@@ -14,6 +14,7 @@ description: "Shows DeepSeek API balance and credit breakdown in configurable ta
 author: "Fclem"
 categories: ["analytics"]
 repo_url: "https://github.com/Fclem/kandev-plugin-deepseek-balance"
+icon: "assets/deepseek.svg"
 
 # min_kandev_version is the oldest kandev release this plugin will install
 # against. A release host compares it to its own version at install time and
