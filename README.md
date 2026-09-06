@@ -85,27 +85,9 @@ dependency the kandev backend grows. Building the tool where it lives keeps
 | --- | --- | --- |
 | **DeepSeek API key** | empty | Secret used only by the plugin backend for `GET https://api.deepseek.com/user/balance`. |
 | **Display · Task top right** | enabled | Shows the balance pill in the task session top bar. |
-| **Display · Prompt input** | disabled | Shows the balance action in the prompt toolbar beside Send. |
+| **Display · Prompt input** | disabled | Shows the balance action beside Send in the prompt toolbar. |
 
-Both display settings may be enabled simultaneously. If the configured key is empty, the backend uses `DEEPSEEK_API_KEY` from its process environment when available.
-
-The balance webhook requires an authenticated Kandev identity. The API key is never returned to the browser, and DeepSeek response bodies are not copied into plugin errors.
-
-## Develop
-
-The Kandev plugin SDK is currently consumed from a sibling Kandev checkout:
-
-```sh
-curl -F package=@kandev-deepseek-credits-0.1.0.tar.gz \
-  http://localhost:<kandev-port>/api/plugins/install
-```
-
-kandev verifies `checksums.txt`, validates the manifest, extracts the package,
-spawns the host-matching binary, and — once the go-plugin handshake completes —
-marks the plugin active. Sideloaded plugins register **disabled/unverified**;
-enable yours in **Settings > Plugins** (the `plugins` feature flag must be on).
-Reinstalling the same version returns 409 — bump `version` in `manifest.yaml`
-(and the lockstep `VERSION` in the Makefile).
+Both display settings may be enabled simultaneously. The API key never reaches the browser.
 
 ## Minimum host version
 

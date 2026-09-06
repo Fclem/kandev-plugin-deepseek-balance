@@ -420,25 +420,7 @@ func floatConfig(v any, fallback float64) float64 {
 	if f, ok := v.(float64); ok {
 		return f
 	}
-	if enabled, ok := config[configKeyDisplayTaskTopRight].(bool); ok {
-		settings.DisplayTaskTopRight = enabled
-	}
-	if enabled, ok := config[configKeyDisplayPromptInput].(bool); ok {
-		settings.DisplayPromptInput = enabled
-	}
-	return settings, nil
-}
-
-func jsonResponse(status int, body any) (*pluginsdk.WebhookResponse, error) {
-	encoded, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("encode webhook response: %w", err)
-	}
-	return &pluginsdk.WebhookResponse{
-		Status:  int32(status),
-		Headers: map[string]string{"Content-Type": "application/json"},
-		Body:    encoded,
-	}, nil
+	return fallback
 }
 
 // positiveFloatOr coerces a JSON config value (numbers arrive as float64) to a
