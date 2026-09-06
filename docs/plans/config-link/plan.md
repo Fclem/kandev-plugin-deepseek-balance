@@ -1,38 +1,46 @@
-# Config-link implementation plan
+# Config-link and prompt-pill implementation plan
 
-## Scope
+## Completed config-link scope
 
-Update the hand-written plugin bundle so configuration guidance in the balance
-panel links to the installed plugin's native Settings > Plugins detail page.
-No manifest, backend, route, or package contract changes are required.
+The hand-written plugin bundle links configuration guidance in the balance panel
+to `/settings/plugins/kandev-plugin-deepseek-balance` and uses `host.navigate`
+for SPA navigation. The existing Node/vm tests cover that behavior.
 
-## Design
+## Continuation scope
 
-1. Add one module-level settings route constant derived from the manifest plugin
-   id.
-2. Add a small panel helper that renders the settings destination as a native
-   anchor with an `href`, muted/underlined styling, and an `onClick` handler
-   that prevents a full reload and calls `host.navigate`.
-3. Use that helper in both panel branches that tell an operator to check the
-   plugin settings: the unconfigured state and the error-without-snapshot
-   state.
-4. Extend the existing Node/vm bundle tests with a host navigation spy and
-   assertions for the anchor's href and click behavior.
+Fix the reported prompt-input regressions without changing task top-right
+behavior:
 
-## TDD order
+1. Make the prompt-input trigger's hover/focus/click panel reliably open and
+   keep the panel reachable across the transparent hover bridge.
+2. Suppress the prompt-input amount at or above `warn_below`; show it below the
+   threshold. Keep the branded trigger visible in both cases.
+3. Replace the current lowercase `Ds` monogram with a simple stable DeepSeek
+   whale SVG if the official shape can be embedded in the no-build bundle;
+   otherwise use an uppercase `DS` fallback. Preserve the icon in both
+   placements and retain all tone states.
+4. Add focused Node/vm tests for prompt hover bridge behavior and threshold
+   display before editing production code.
 
-1. Add the failing unconfigured-state link test and error-state link test.
-2. Run `node --test test/bundle.test.mjs` and confirm the new assertions fail.
-3. Implement the route constant, helper, and panel call sites.
-4. Re-run the bundle test and syntax check; refactor only while green.
-5. Run `make fmt` first, then `make typecheck test lint` if supported by the
-   repository; otherwise run the documented plugin equivalents (`make test`,
-   `make vet`) and record the unavailable targets.
-6. Review the diff and commit with a Conventional Commits message.
+## TDD order for continuation
+
+1. Add failing prompt-input tests: healthy amount hidden, low amount shown,
+   hover opens the detail panel, and entering the fixed panel cancels close.
+2. Run `node --test test/bundle.test.mjs` and confirm those assertions fail.
+3. Implement the smallest prompt rendering and interaction changes.
+4. Re-run syntax and bundle tests; refactor only while green.
+5. Run `make fmt`, then the repository-supported checks (`make test`, `make
+   vet`; `make typecheck test lint` is not defined in this plugin Makefile).
+6. Package the plugin, start an isolated Kandev dev instance bound to LAN
+   interfaces, and smoke-test the actual prompt surface.
+7. Commit all continuation changes with a Conventional Commits message.
 
 ## Acceptance criteria
 
-- Both configuration guidance branches expose an accessible link.
-- The link points to `/settings/plugins/kandev-plugin-deepseek-balance`.
-- A click calls `host.navigate` with that route and does not submit or reload.
-- Existing panel text and all unrelated balance behavior remain unchanged.
+- Configuration links remain unchanged and functional.
+- Prompt hover/focus/click opens the existing detail panel.
+- Moving from the prompt trigger into the panel does not close it.
+- Healthy prompt balances show only the whale/DS icon; low balances show the
+  amount as well.
+- The visual icon is the selected whale SVG or uppercase `DS` fallback, not
+  the current lowercase `Ds` monogram.

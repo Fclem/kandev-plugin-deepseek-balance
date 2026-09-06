@@ -126,8 +126,8 @@ function usagePopoverPosition(rect, viewportWidth, viewportHeight, placement) {
   return { top: rect.bottom, left: left };
 }
 
-// monogram renders the DeepSeek chip: a brand-hue rounded square with a "Ds"
-// monogram (no hand-drawn whale). tone null renders the neutral muted chip;
+// monogram renders the DeepSeek chip: a brand-hue rounded square with the
+// uppercase "DS" fallback mark. tone null renders the neutral muted chip;
 // state drives the pulse for the checking state.
 function monogram(h, size, opts) {
   opts = opts || {};
@@ -156,18 +156,27 @@ function monogram(h, size, opts) {
         fontVariantNumeric: "tabular-nums",
       },
     },
-    "Ds",
+    "DS",
   );
 }
 
+function promptShowsAmount(d) {
+  var primary = primaryInfo(d);
+  if (!primary || !d || typeof d.warn_below !== "number") return false;
+  var total = Number(primary.total_balance);
+  return isFinite(total) && total < d.warn_below;
+}
+
 // pillContent renders what the pill shows: the monogram plus the formatted
-// primary-currency total when one exists; icon-only (colored by is_available)
-// for an account with no balance data; the neutral muted chip for the
-// loading / unconfigured / error-without-snapshot states.
-function pillContent(h, d) {
+// primary-currency total when one exists and opts.showAmount is not false;
+// icon-only (colored by is_available) for an account with no balance data or
+// a prompt-input balance at/above its warning threshold.
+function pillContent(h, d, opts) {
+  opts = opts || {};
+  var showAmount = opts.showAmount !== false;
   var status = pillState(d);
   var primary = primaryInfo(d);
-  if (primary) {
+  if (primary && showAmount) {
     var tone = pillTone(d);
     var amount = Number(primary.total_balance);
     var compact = isFinite(amount) && Math.abs(amount) >= 1e6;
@@ -588,10 +597,17 @@ function makePromptBalance(host) {
 
     var d = state.data;
     if (!taskId || !displayEnabled(d, "prompt-input")) return null;
-
     return h(
       "div",
-      { ref: wrapRef, style: { display: "inline-flex" }, onMouseEnter: openNow, onMouseLeave: scheduleClose },
+      {
+        ref: wrapRef,
+        "data-deepseek-surface": "prompt-input",
+        style: { display: "inline-flex" },
+        onMouseEnter: openNow,
+        onMouseLeave: scheduleClose,
+        onPointerEnter: openNow,
+        onPointerLeave: scheduleClose,
+      },
       h(
         ui.Button,
         {
@@ -601,18 +617,29 @@ function makePromptBalance(host) {
           size: "sm",
           className: "h-7 gap-1.5 px-1.5 text-xs text-muted-foreground hover:bg-primary/10 hover:text-foreground",
           "aria-label": "DeepSeek API balance",
+          "aria-haspopup": "dialog",
           onFocus: openNow,
           onClick: toggle,
         },
-        pillContent(h, d),
+        pillContent(h, d, { showAmount: promptShowsAmount(d) }),
       ),
       open
         ? h(
             "div",
             {
+              "data-deepseek-panel": "prompt-input",
               onMouseEnter: cancelClose,
               onMouseLeave: scheduleClose,
-              style: { position: "fixed", bottom: (window.innerHeight - pos.bottom) + "px", left: pos.left + "px", zIndex: 9999, paddingBottom: "8px" },
+              onPointerEnter: cancelClose,
+              onPointerLeave: scheduleClose,
+              style: {
+                position: "fixed",
+                bottom: (window.innerHeight - pos.bottom) + "px",
+                left: pos.left + "px",
+                zIndex: 9999,
+                paddingBottom: "12px",
+                pointerEvents: "auto",
+              },
             },
             h(
               ui.Card,

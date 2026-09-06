@@ -340,6 +340,41 @@ function mountPlugin(plugin, { slotProps, rect }) {
   return { ...hostKit, mounted };
 }
 
+// mountPromptPlugin mounts the chat-input-actions component while preserving
+// the same host/action harness used by the top-bar tests.
+function mountPromptPlugin(plugin, { slotProps, rect }) {
+  const react = createReactApi();
+  const hostKit = makeHost({ React: react });
+  const components = [];
+  plugin.initialize(
+    {
+      registerComponent(slot, comp) {
+        components.push(comp);
+      },
+    },
+    hostKit.host,
+  );
+  const mounted = mount(react, components[1], { slotProps, rect });
+  return { ...hostKit, mounted };
+}
+
+function promptPillOf(tree) {
+  const buttons = byId(tree, "deepseek-credits-prompt-action");
+  assert.equal(buttons.length, 1, "exactly one prompt-input pill");
+  return buttons[0];
+}
+
+function promptPillText(tree) {
+  return renderedText(promptPillOf(tree));
+}
+
+function promptWrapOf(tree) {
+  const wraps = everyElement(tree, (n) => n.type === "div" && typeof n.props.onMouseEnter === "function");
+  assert.equal(wraps.length, 1, "exactly one prompt-input hover wrapper");
+  return wraps[0];
+}
+
+
 // okData builds a canned ok action response.
 function okData(overrides) {
   return {
@@ -384,6 +419,43 @@ function openPanel(mounted) {
   wrap.props.onMouseEnter();
   return mounted.tree();
 }
+
+test("prompt input hides healthy amount while retaining the DeepSeek icon", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(0, okData({ display_prompt_input: true }));
+
+  const text = promptPillText(mounted.tree());
+  assert.ok(text.includes("DS"), "prompt pill carries the uppercase DeepSeek fallback icon");
+  assert.ok(!text.includes("¥110.00"), "healthy prompt balance hides the amount");
+  mounted.unmount();
+});
+
+test("prompt input shows low amount and keeps its hover panel reachable", async () => {
+  const { plugin, timeouts } = loadPlugin();
+  const { mounted, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(
+    0,
+    okData({
+      display_prompt_input: true,
+      balance_infos: [{ currency: "CNY", total_balance: "5.00", granted_balance: "0.00", topped_up_balance: "5.00" }],
+    }),
+  );
+
+  assert.ok(promptPillText(mounted.tree()).includes("¥5.00"), "low prompt balance shows the amount");
+
+  const wrap = promptWrapOf(mounted.tree());
+  wrap.props.onMouseEnter();
+  assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 1, "prompt hover opens the panel");
+
+  wrap.props.onMouseLeave();
+  assert.equal(timeouts.size, 1, "prompt mouseleave schedules close");
+  const panelWrap = everyElement(mounted.tree(), (n) => n.props && n.props.style && n.props.style.position === "fixed")[0];
+  assert.ok(panelWrap, "prompt fixed panel bridge exists");
+  panelWrap.props.onMouseEnter();
+  assert.equal(timeouts.size, 0, "entering the prompt panel cancels close");
+  mounted.unmount();
+});
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -437,7 +509,7 @@ test("pill renders the formatted primary-currency balance", async () => {
 
   const text = pillText(mounted.tree());
   assert.ok(text.includes("¥110.00"), "pill shows the formatted total, got: " + text);
-  assert.ok(text.includes("Ds"), "pill carries the DeepSeek monogram");
+  assert.ok(text.includes("DS"), "pill carries the uppercase DeepSeek fallback icon");
 });
 
 test("pill turns amber below the server-sent warn_below", async () => {
