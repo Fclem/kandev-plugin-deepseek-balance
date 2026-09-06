@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2] - 2026-09-06
+
+### Changed
+
+- feat: add DeepSeek plugin logo (#4) (8fc9e1b)
+- Harden configurable balance pill lifecycle (#3) (3440d06)
+
+
 ## [0.1.1] - 2026-09-06
 
 ### Changed
