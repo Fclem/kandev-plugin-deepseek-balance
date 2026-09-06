@@ -83,6 +83,8 @@ curl -F package=@kandev-plugin-deepseek-credits-0.1.0.tar.gz \
   http://localhost:8080/api/plugins/install
 ```
 
+Kandev verifies the archive's internal `checksums.txt`, validates the manifest, and starts the binary matching the host platform.
+
 ## Configure
 
 Note the Makefile runs `plugin-pack` with `cd $(KANDEV_SDK) && go run
@@ -95,24 +97,19 @@ entry`. Pulling them in would force this repo's `go.sum` to track every
 dependency the kandev backend grows. Building the tool where it lives keeps
 `go.sum` scoped to what your plugin actually imports.
 
-If the plugin setting is empty, the backend uses `DEEPSEEK_API_KEY` from its process environment when available.
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| **DeepSeek API key** | empty | Secret used only by the plugin backend for `GET https://api.deepseek.com/user/balance`. |
+| **Display · Task top right** | enabled | Shows the balance pill in the task session top bar. |
+| **Display · Prompt input** | disabled | Shows the balance action in the prompt toolbar beside Send. |
 
-Display options:
+Both display settings may be enabled simultaneously. If the configured key is empty, the backend uses `DEEPSEEK_API_KEY` from its process environment when available.
 
-- **Display · Task top right** is enabled by default and shows the current top-bar pill.
-- **Display · Prompt input** is disabled by default and shows the same balance next to the prompt send button.
-
-Both options may be enabled at the same time.
-
-The balance webhook requires an authenticated Kandev identity. API keys and upstream response bodies are never returned to the browser or included in plugin errors.
-
-## Planned credential discovery
-
-The proposed post-install search for existing DeepSeek keys from OMP, Pi, OpenCode, and other verified coding clients is documented in [Credential discovery design](docs/credential-discovery.md). It is intentionally not implemented in this release.
+The balance webhook requires an authenticated Kandev identity. The API key is never returned to the browser, and DeepSeek response bodies are not copied into plugin errors.
 
 ## Develop
 
-The Go module expects a sibling Kandev checkout at `../kandev` because the plugin SDK is not yet published as a standalone module.
+The Kandev plugin SDK is currently consumed from a sibling Kandev checkout:
 
 ```sh
 curl -F package=@kandev-deepseek-credits-0.1.0.tar.gz \
