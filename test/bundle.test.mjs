@@ -281,7 +281,7 @@ function loadPlugin() {
   };
   vm.runInNewContext(bundleSource(), sandbox);
 
-  return { plugin, document, intervals, timeouts };
+  return { plugin, document, intervals, timeouts, closeTimers: sandbox.activeCloseTimers };
 }
 
 // loadWithTestableHelpers loads a second instance exposing the pure helpers.
@@ -453,7 +453,7 @@ test("prompt input suppresses amount at the warning threshold", async () => {
 });
 
 test("prompt input shows low amount and keeps its hover panel reachable", async () => {
-  const { plugin, timeouts } = loadPlugin();
+  const { plugin, timeouts, closeTimers } = loadPlugin();
   const { mounted, resolveAction } = mountPromptPlugin(plugin, {
     slotProps: { taskId: "task-1" },
     rect: { top: 700, right: 300, bottom: 728, left: 272, width: 28, height: 28 },
@@ -477,7 +477,9 @@ test("prompt input shows low amount and keeps its hover panel reachable", async 
   const panelWrap = everyElement(mounted.tree(), (n) => n.props && n.props.style && n.props.style.position === "fixed")[0];
   assert.ok(panelWrap, "prompt fixed panel bridge exists");
   assert.equal(panelWrap.props.style.bottom, "200px", "prompt panel sits directly above the trigger");
+  assert.equal(panelWrap.props.style.boxSizing, "border-box", "bridge padding stays inside the viewport clamp");
   panelWrap.props.onMouseEnter();
+  assert.equal(closeTimers.size, 0, "entering the panel releases the canceled timer");
   assert.equal(timeouts.size, 0, "entering the prompt panel cancels close");
   mounted.unmount();
 });
@@ -925,6 +927,35 @@ test("destroy blocks post-teardown events and prop-change timers", async () => {
   mounted.unmount();
 });
 
+test("reinitialize isolates old component promises and handlers", async () => {
+  const { plugin } = loadPlugin();
+  const react = createReactApi();
+  const hostKit = makeHost({ React: react });
+  const components = [];
+  const registry = {
+    registerComponent(_slot, component) {
+      components.push(component);
+    },
+  };
+
+  plugin.initialize(registry, hostKit.host);
+  const oldMounted = mount(react, components[0], { slotProps: { workspaceId: "old-workspace" } });
+  plugin.destroy();
+
+  plugin.initialize(registry, hostKit.host);
+  const newMounted = mount(react, components[2], { slotProps: { workspaceId: "new-workspace" } });
+  await hostKit.resolveAction(0, okData());
+
+  assert.ok(!pillText(oldMounted.tree()).includes("¥110.00"), "old promise cannot update after reinitialize");
+  const oldWrap = everyElement(oldMounted.tree(), (n) => n.type === "div" && typeof n.props.onMouseEnter === "function")[0];
+  oldWrap.props.onMouseEnter();
+  assert.equal(hostKit.actionCalls.length, 2, "old handlers cannot issue actions after reinitialize");
+
+  oldMounted.unmount();
+  newMounted.unmount();
+  plugin.destroy();
+});
+
 // ---------------------------------------------------------------------------
 // Pure helper contracts
 // ---------------------------------------------------------------------------
@@ -951,6 +982,11 @@ test("usagePopoverPosition anchors below the trigger and clamps to the viewport"
   const clamped = { ...usagePopoverPosition({ top: 20, right: 100, bottom: 48 }, 1440, 900, "below") };
   assert.deepEqual(clamped, { top: 48, left: 8 });
 
+  const exactAbove = { ...usagePopoverPosition({ top: 340, right: 300, bottom: 368 }, 1440, 900, "above") };
+  assert.deepEqual(exactAbove, { bottom: 560, left: 28 }, "exact bridge-inclusive fit stays above");
+
+  const underAbove = { ...usagePopoverPosition({ top: 339, right: 300, bottom: 367 }, 1440, 900, "above") };
+  assert.deepEqual(underAbove, { top: 367, left: 28 }, "one pixel under fit flips below");
   const above = { ...usagePopoverPosition({ top: 700, right: 300, bottom: 728 }, 1440, 900, "above") };
   assert.deepEqual(above, { bottom: 200, left: 28 });
 

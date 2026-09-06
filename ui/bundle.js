@@ -25,6 +25,7 @@ var PROMPT_ID = "deepseek-credits-prompt-action";
 var CONFIG_SETTINGS_HREF = "/settings/plugins/kandev-plugin-deepseek-balance";
 var PANEL_WIDTH = 272;
 var PANEL_HEIGHT = 320;
+var PANEL_BRIDGE = 12;
 
 var TOPBAR_CSS =
   "#deepseek-credits-topbar{height:28px;min-height:28px}" +
@@ -52,6 +53,7 @@ function removeTopbarStyles() {
 var activeIntervals = new Set();
 var activeCloseTimers = new Set();
 var pluginDestroyed = false;
+var lifecycleGeneration = 0;
 
 // ---- palette ---------------------------------------------------------------
 // Calm by default: normal balance is soft indigo, low balance warms to amber,
@@ -126,12 +128,12 @@ function usagePopoverPosition(rect, viewportWidth, viewportHeight, placement) {
   var margin = 8;
   var aboveSpace = rect.top;
   var belowSpace = viewportHeight - rect.bottom;
-  var aboveFits = aboveSpace >= PANEL_HEIGHT + margin;
-  var belowFits = belowSpace >= PANEL_HEIGHT + margin;
+  var aboveFits = aboveSpace >= PANEL_HEIGHT + PANEL_BRIDGE + margin;
+  var belowFits = belowSpace >= PANEL_HEIGHT + PANEL_BRIDGE + margin;
   var chosen = placement === "above" ? "above" : "below";
   if (chosen === "above" && !aboveFits && belowFits) chosen = "below";
   if (chosen === "below" && !belowFits && aboveFits) chosen = "above";
-  var maxTop = Math.max(margin, viewportHeight - PANEL_HEIGHT - margin);
+  var maxTop = Math.max(margin, viewportHeight - PANEL_HEIGHT - PANEL_BRIDGE - margin);
   if (chosen === "above") {
     var desiredBottom = viewportHeight - rect.top;
     return { bottom: Math.max(margin, Math.min(desiredBottom, maxTop)), left: left };
@@ -391,6 +393,10 @@ function makeTopBarBalance(host) {
   var React = host.React;
   var h = host.jsx;
   var ui = host.ui;
+  var generation = lifecycleGeneration;
+  function isCurrent() {
+    return !pluginDestroyed && generation === lifecycleGeneration;
+  }
 
   return function TopBarBalance(props) {
     var ctx = (props && props.slotProps) || {};
@@ -417,7 +423,7 @@ function makeTopBarBalance(host) {
     // next interval or Refresh retries — the backend always answers 200 with
     // body-encoded domain errors.
     function fetchBalance(opts) {
-      if (pluginDestroyed) return;
+      if (!isCurrent()) return;
       opts = opts || {};
       var input = { workspaceId: workspaceId };
       if (opts.refresh) {
@@ -427,12 +433,12 @@ function makeTopBarBalance(host) {
       host.api
         .invokeAction("balance.get", input)
         .then(function (data) {
-          if (pluginDestroyed) return;
+          if (!isCurrent()) return;
           setRefreshing(false);
           setState({ data: data, error: null });
         })
         .catch(function () {
-          if (pluginDestroyed) return;
+          if (!isCurrent()) return;
           setRefreshing(false);
           setState(function (s) { return { data: s.data, error: true }; });
         });
@@ -448,7 +454,7 @@ function makeTopBarBalance(host) {
     }, [workspaceId]);
 
     React.useEffect(function () {
-      if (pluginDestroyed || !workspaceId) return;
+      if (!isCurrent()) return;
       var id = setInterval(function () { fetchBalance({}); }, AUTO_REFRESH_MS);
       activeIntervals.add(id);
       return function () {
@@ -475,25 +481,25 @@ function makeTopBarBalance(host) {
       closeTimer.current = null;
     }
     function openNow() {
-      if (pluginDestroyed) return;
+      if (!isCurrent()) return;
       cancelClose();
       reposition();
       setOpen(true);
       load(false);
     }
     function scheduleClose() {
-      if (pluginDestroyed) return;
+      if (!isCurrent()) return;
       cancelClose();
       var timer = setTimeout(function () {
         activeCloseTimers.delete(timer);
         closeTimer.current = null;
-        if (!pluginDestroyed) setOpen(false);
+        if (isCurrent()) setOpen(false);
       }, 260);
       closeTimer.current = timer;
       activeCloseTimers.add(timer);
     }
     function toggle() {
-      if (pluginDestroyed) return;
+      if (!isCurrent()) return;
       if (open) {
         setOpen(false);
       } else {
@@ -538,6 +544,7 @@ function makeTopBarBalance(host) {
                 left: pos.left + "px",
                 zIndex: 9999,
                 paddingTop: "8px",
+                boxSizing: "border-box",
                 maxHeight: "calc(100vh - 16px)",
                 overflowY: "auto",
               },
@@ -557,6 +564,10 @@ function makePromptBalance(host) {
   var React = host.React;
   var h = host.jsx;
   var ui = host.ui;
+  var generation = lifecycleGeneration;
+  function isCurrent() {
+    return !pluginDestroyed && generation === lifecycleGeneration;
+  }
 
   return function PromptBalance(props) {
     var ctx = (props && props.slotProps) || {};
@@ -577,23 +588,23 @@ function makePromptBalance(host) {
     var closeTimer = React.useRef(null);
     var focusOpened = React.useRef(false);
     function load(force) {
-      if (pluginDestroyed || !taskId) return;
+      if (!isCurrent() || !taskId) return;
       if (force) setRefreshing(true);
       host.api.invokeAction("balance.get.task", {
         taskId: taskId,
         body: force ? { refresh: true } : undefined,
       }).then(function (data) {
-        if (pluginDestroyed) return;
+        if (!isCurrent()) return;
         setRefreshing(false);
         setState({ data: data });
       }).catch(function () {
-        if (pluginDestroyed) return;
+        if (!isCurrent()) return;
         setRefreshing(false);
       });
     }
 
     React.useEffect(function () {
-      if (pluginDestroyed || !taskId) return;
+      if (!isCurrent() || !taskId) return;
       load(false);
       var id = setInterval(function () { load(false); }, AUTO_REFRESH_MS);
       activeIntervals.add(id);
@@ -613,27 +624,29 @@ function makePromptBalance(host) {
     }
     function cancelClose() {
       clearTimeout(closeTimer.current);
+      activeCloseTimers.delete(closeTimer.current);
+      closeTimer.current = null;
     }
     function openNow() {
-      if (pluginDestroyed) return;
+      if (!isCurrent()) return;
       cancelClose();
       reposition();
       setOpen(true);
       load(false);
     }
     function scheduleClose() {
-      if (pluginDestroyed) return;
+      if (!isCurrent()) return;
       cancelClose();
       var timer = setTimeout(function () {
         activeCloseTimers.delete(timer);
         closeTimer.current = null;
-        if (!pluginDestroyed) setOpen(false);
+        if (isCurrent()) setOpen(false);
       }, 260);
       closeTimer.current = timer;
       activeCloseTimers.add(timer);
     }
     function openFromFocus() {
-      if (pluginDestroyed) return;
+      if (!isCurrent()) return;
       focusOpened.current = true;
       if (open) {
         cancelClose();
@@ -642,7 +655,7 @@ function makePromptBalance(host) {
       openNow();
     }
     function toggle() {
-      if (pluginDestroyed) return;
+      if (!isCurrent()) return;
       if (focusOpened.current) {
         focusOpened.current = false;
         cancelClose();
@@ -692,9 +705,9 @@ function makePromptBalance(host) {
                 top: pos.top === undefined ? "auto" : pos.top + "px",
                 bottom: pos.bottom === undefined ? "auto" : pos.bottom + "px",
                 left: pos.left + "px",
-                zIndex: 9999,
                 paddingBottom: "12px",
                 pointerEvents: "auto",
+                boxSizing: "border-box",
                 maxHeight: "calc(100vh - 16px)",
                 overflowY: "auto",
               },
@@ -712,12 +725,14 @@ function makePromptBalance(host) {
 // ==========================================================================
 window.registerKandevPlugin("kandev-plugin-deepseek-balance", {
   initialize: function (registry, host) {
+    lifecycleGeneration += 1;
     pluginDestroyed = false;
     injectTopbarStyles();
     registry.registerComponent("chat-top-bar", makeTopBarBalance(host));
     registry.registerComponent("chat-input-actions", makePromptBalance(host));
   },
   destroy: function () {
+    lifecycleGeneration += 1;
     pluginDestroyed = true;
     activeIntervals.forEach(clearInterval);
     activeIntervals.clear();
