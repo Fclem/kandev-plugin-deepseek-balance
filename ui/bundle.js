@@ -116,8 +116,8 @@ function displayEnabled(data, surface) {
   return false;
 }
 
-// usagePopoverPosition anchors the fixed panel below the trigger rect, clamped
-// to the viewport (copied from kandev-plugin-provider-usage).
+// usagePopoverPosition anchors a fixed panel above or below the trigger,
+// clamped to the viewport (copied from kandev-plugin-provider-usage).
 function usagePopoverPosition(rect, viewportWidth, viewportHeight, placement) {
   var left = Math.max(8, Math.min(rect.right - PANEL_WIDTH, viewportWidth - PANEL_WIDTH - 8));
   if (placement === "above") {
@@ -605,8 +605,6 @@ function makePromptBalance(host) {
         style: { display: "inline-flex" },
         onMouseEnter: openNow,
         onMouseLeave: scheduleClose,
-        onPointerEnter: openNow,
-        onPointerLeave: scheduleClose,
       },
       h(
         ui.Button,
@@ -630,11 +628,9 @@ function makePromptBalance(host) {
               "data-deepseek-panel": "prompt-input",
               onMouseEnter: cancelClose,
               onMouseLeave: scheduleClose,
-              onPointerEnter: cancelClose,
-              onPointerLeave: scheduleClose,
               style: {
                 position: "fixed",
-                bottom: (window.innerHeight - pos.bottom) + "px",
+                bottom: pos.bottom + "px",
                 left: pos.left + "px",
                 zIndex: 9999,
                 paddingBottom: "12px",

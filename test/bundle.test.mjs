@@ -431,9 +431,28 @@ test("prompt input hides healthy amount while retaining the DeepSeek icon", asyn
   mounted.unmount();
 });
 
+test("prompt input suppresses amount at the warning threshold", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(
+    0,
+    okData({
+      display_prompt_input: true,
+      balance_infos: [{ currency: "CNY", total_balance: "10.00", granted_balance: "0.00", topped_up_balance: "10.00" }],
+    }),
+  );
+
+  assert.ok(promptPillText(mounted.tree()).includes("DS"), "threshold prompt pill keeps the icon");
+  assert.ok(!promptPillText(mounted.tree()).includes("¥10.00"), "threshold amount stays hidden");
+  mounted.unmount();
+});
+
 test("prompt input shows low amount and keeps its hover panel reachable", async () => {
   const { plugin, timeouts } = loadPlugin();
-  const { mounted, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  const { mounted, resolveAction } = mountPromptPlugin(plugin, {
+    slotProps: { taskId: "task-1" },
+    rect: { top: 700, right: 300, bottom: 728, left: 272, width: 28, height: 28 },
+  });
   await resolveAction(
     0,
     okData({
@@ -452,12 +471,37 @@ test("prompt input shows low amount and keeps its hover panel reachable", async 
   assert.equal(timeouts.size, 1, "prompt mouseleave schedules close");
   const panelWrap = everyElement(mounted.tree(), (n) => n.props && n.props.style && n.props.style.position === "fixed")[0];
   assert.ok(panelWrap, "prompt fixed panel bridge exists");
+  assert.equal(panelWrap.props.style.bottom, "200px", "prompt panel sits directly above the trigger");
   panelWrap.props.onMouseEnter();
   assert.equal(timeouts.size, 0, "entering the prompt panel cancels close");
   mounted.unmount();
 });
 
 // ---------------------------------------------------------------------------
+
+test("prompt focus opens the detail panel", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(0, okData({ display_prompt_input: true }));
+
+  promptPillOf(mounted.tree()).props.onFocus();
+  assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 1, "focus opens the prompt panel");
+  mounted.unmount();
+});
+
+test("prompt click opens after a pointer entry without duplicate loads", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, actionCalls, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(0, okData({ display_prompt_input: true }));
+
+  const wrap = promptWrapOf(mounted.tree());
+  if (typeof wrap.props.onPointerEnter === "function") wrap.props.onPointerEnter();
+  promptPillOf(mounted.tree()).props.onClick();
+
+  assert.equal(actionCalls.length, 2, "hover/click sequence issues one follow-up load");
+  assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 1, "click opens after pointer entry");
+  mounted.unmount();
+});
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -832,4 +876,7 @@ test("usagePopoverPosition anchors below the trigger and clamps to the viewport"
   // A trigger near the left edge clamps to the 8px margin.
   const clamped = { ...usagePopoverPosition({ top: 20, right: 100, bottom: 48 }, 1440, 900, "below") };
   assert.deepEqual(clamped, { top: 48, left: 8 });
+
+  const above = { ...usagePopoverPosition({ top: 700, right: 300, bottom: 728 }, 1440, 900, "above") };
+  assert.deepEqual(above, { bottom: 200, left: 28 });
 });
