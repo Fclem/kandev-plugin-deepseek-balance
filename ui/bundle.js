@@ -49,6 +49,7 @@ function removeTopbarStyles() {
 // activeIntervals lets plugin destroy() clear the silent re-read timers even
 // when the component outlived a registry teardown edge.
 var activeIntervals = new Set();
+var activeCloseTimers = new Set();
 
 // ---- palette ---------------------------------------------------------------
 // Calm by default: normal balance is soft indigo, low balance warms to amber,
@@ -441,10 +442,9 @@ function makeTopBarBalance(host) {
       return function () {
         clearInterval(id);
         activeIntervals.delete(id);
-        if (closeTimer.current) {
-          clearTimeout(closeTimer.current);
-          closeTimer.current = null;
-        }
+        clearTimeout(closeTimer.current);
+        activeCloseTimers.delete(closeTimer.current);
+        closeTimer.current = null;
       };
     }, [workspaceId]);
 
@@ -458,10 +458,9 @@ function makeTopBarBalance(host) {
       setPos(usagePopoverPosition(r, window.innerWidth, window.innerHeight, "below"));
     }
     function cancelClose() {
-      if (closeTimer.current) {
-        clearTimeout(closeTimer.current);
-        closeTimer.current = null;
-      }
+      clearTimeout(closeTimer.current);
+      activeCloseTimers.delete(closeTimer.current);
+      closeTimer.current = null;
     }
     function openNow() {
       cancelClose();
@@ -471,7 +470,13 @@ function makeTopBarBalance(host) {
     }
     function scheduleClose() {
       cancelClose();
-      closeTimer.current = setTimeout(function () { setOpen(false); }, 260);
+      var timer = setTimeout(function () {
+        activeCloseTimers.delete(timer);
+        closeTimer.current = null;
+        setOpen(false);
+      }, 260);
+      closeTimer.current = timer;
+      activeCloseTimers.add(timer);
     }
     function toggle() {
       if (open) {
@@ -569,6 +574,7 @@ function makePromptBalance(host) {
         clearInterval(id);
         activeIntervals.delete(id);
         clearTimeout(closeTimer.current);
+        activeCloseTimers.delete(closeTimer.current);
         closeTimer.current = null;
       };
     }, [taskId]);
@@ -579,10 +585,9 @@ function makePromptBalance(host) {
       setPos(usagePopoverPosition(element.getBoundingClientRect(), window.innerWidth, window.innerHeight, "above"));
     }
     function cancelClose() {
-      if (closeTimer.current) {
-        clearTimeout(closeTimer.current);
-        closeTimer.current = null;
-      }
+      clearTimeout(closeTimer.current);
+      activeCloseTimers.delete(closeTimer.current);
+      closeTimer.current = null;
     }
     function openNow() {
       cancelClose();
@@ -592,10 +597,20 @@ function makePromptBalance(host) {
     }
     function scheduleClose() {
       cancelClose();
-      closeTimer.current = setTimeout(function () { setOpen(false); }, 260);
+      var timer = setTimeout(function () {
+        activeCloseTimers.delete(timer);
+        closeTimer.current = null;
+        setOpen(false);
+      }, 260);
+      closeTimer.current = timer;
+      activeCloseTimers.add(timer);
     }
     function openFromFocus() {
-      if (!open) focusOpened.current = true;
+      focusOpened.current = true;
+      if (open) {
+        cancelClose();
+        return;
+      }
       openNow();
     }
     function toggle() {
@@ -662,7 +677,6 @@ function makePromptBalance(host) {
     );
   };
 }
-
 // ==========================================================================
 window.registerKandevPlugin("kandev-plugin-deepseek-balance", {
   initialize: function (registry, host) {
@@ -673,6 +687,8 @@ window.registerKandevPlugin("kandev-plugin-deepseek-balance", {
   destroy: function () {
     activeIntervals.forEach(clearInterval);
     activeIntervals.clear();
+    activeCloseTimers.forEach(clearTimeout);
+    activeCloseTimers.clear();
     removeTopbarStyles();
   },
 });

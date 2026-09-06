@@ -489,17 +489,20 @@ test("prompt focus opens the detail panel", async () => {
   mounted.unmount();
 });
 
-test("prompt click opens after a pointer entry without duplicate loads", async () => {
+test("prompt hover then focus/click opens once and second click closes", async () => {
   const { plugin } = loadPlugin();
   const { mounted, actionCalls, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
   await resolveAction(0, okData({ display_prompt_input: true }));
 
-  const wrap = promptWrapOf(mounted.tree());
-  if (typeof wrap.props.onPointerEnter === "function") wrap.props.onPointerEnter();
+  promptWrapOf(mounted.tree()).props.onMouseEnter();
+  promptPillOf(mounted.tree()).props.onFocus();
   promptPillOf(mounted.tree()).props.onClick();
 
-  assert.equal(actionCalls.length, 2, "hover/click sequence issues one follow-up load");
-  assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 1, "click opens after pointer entry");
+  assert.equal(actionCalls.length, 2, "hover/focus/click issues one follow-up load");
+  assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 1, "first click leaves panel open");
+
+  promptPillOf(mounted.tree()).props.onClick();
+  assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 0, "second click closes the panel");
   mounted.unmount();
 });
 
@@ -873,15 +876,32 @@ test("a rejected invokeAction is transient: last render kept, next interval retr
   intervals.get(intervalId)();
   assert.equal(actionCalls.length, 3, "the next interval retries");
 });
+test("destroy clears timers and removes injected styles", async () => {
+  const { plugin, document, intervals, timeouts } = loadPlugin();
+  const { mounted, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
+  await resolveAction(0, okData());
 
-test("destroy clears the silent re-read timer and removes injected styles", async () => {
-  const { plugin, document, intervals } = loadPlugin();
-  const { mounted } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
+  const wrap = everyElement(mounted.tree(), (n) => n.type === "div" && typeof n.props.onMouseLeave === "function")[0];
+  wrap.props.onMouseLeave();
+  assert.equal(timeouts.size, 1, "topbar close timer is pending");
   assert.equal(intervals.size, 1);
 
   plugin.destroy();
   assert.equal(intervals.size, 0, "silent re-read timer cleared");
+  assert.equal(timeouts.size, 0, "topbar close timer cleared");
   assert.equal(document.styles.length, 0, "injected styles removed");
+  mounted.unmount();
+});
+
+test("destroy clears a pending prompt close timer", async () => {
+  const { plugin, timeouts } = loadPlugin();
+  const { mounted, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(0, okData({ display_prompt_input: true }));
+
+  promptWrapOf(mounted.tree()).props.onMouseLeave();
+  assert.equal(timeouts.size, 1, "prompt close timer is pending");
+  plugin.destroy();
+  assert.equal(timeouts.size, 0, "prompt close timer cleared");
   mounted.unmount();
 });
 
