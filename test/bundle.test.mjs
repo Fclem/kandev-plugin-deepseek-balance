@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
+const CONFIG_SETTINGS_HREF = "/settings/plugins/kandev-plugin-deepseek-balance";
 
 function bundleSource() {
   return readFileSync(new URL("../ui/bundle.js", import.meta.url), "utf8");
@@ -84,6 +85,7 @@ function makeDocument() {
 function makeHost(overrides) {
   const actionDeferreds = [];
   const actionCalls = [];
+  const navigateCalls = [];
   const host = {
     jsx: element,
     ui: { Button: "Button", Card: "Card" },
@@ -95,6 +97,9 @@ function makeHost(overrides) {
         return d.promise;
       },
     },
+    navigate(href) {
+      navigateCalls.push(href);
+    },
     utils: {
       formatRelativeTime: (v) => "updated:" + String(v),
     },
@@ -103,6 +108,7 @@ function makeHost(overrides) {
   return {
     host,
     actionCalls,
+    navigateCalls,
     resolveAction(i, data) {
       actionDeferreds[i].resolve(data);
       return flushMicrotasks();
@@ -211,6 +217,11 @@ function mount(react, component, { slotProps, rect }) {
     return ctx.tree;
   }
 
+  function updateSlotProps(nextSlotProps) {
+    ctx.props = { slotProps: nextSlotProps };
+    render();
+  }
+
   function unmount() {
     ctx.mounted = false;
     ctx.effects.forEach((e) => {
@@ -222,7 +233,7 @@ function mount(react, component, { slotProps, rect }) {
   }
 
   render();
-  return { tree: () => ctx.tree, render, unmount, react };
+  return { tree: () => ctx.tree, render, updateSlotProps, unmount, react };
 }
 
 // ---------------------------------------------------------------------------
@@ -270,7 +281,7 @@ function loadPlugin() {
   };
   vm.runInNewContext(bundleSource(), sandbox);
 
-  return { plugin, document, intervals, timeouts };
+  return { plugin, document, intervals, timeouts, closeTimers: sandbox.activeCloseTimers };
 }
 
 // loadWithTestableHelpers loads a second instance exposing the pure helpers.
@@ -334,6 +345,41 @@ function mountPlugin(plugin, { slotProps, rect }) {
   return { ...hostKit, mounted };
 }
 
+// mountPromptPlugin mounts the chat-input-actions component while preserving
+// the same host/action harness used by the top-bar tests.
+function mountPromptPlugin(plugin, { slotProps, rect }) {
+  const react = createReactApi();
+  const hostKit = makeHost({ React: react });
+  const components = [];
+  plugin.initialize(
+    {
+      registerComponent(slot, comp) {
+        components.push(comp);
+      },
+    },
+    hostKit.host,
+  );
+  const mounted = mount(react, components[1], { slotProps, rect });
+  return { ...hostKit, mounted };
+}
+
+function promptPillOf(tree) {
+  const buttons = byId(tree, "deepseek-credits-prompt-action");
+  assert.equal(buttons.length, 1, "exactly one prompt-input pill");
+  return buttons[0];
+}
+
+function promptPillText(tree) {
+  return renderedText(promptPillOf(tree));
+}
+
+function promptWrapOf(tree) {
+  const wraps = everyElement(tree, (n) => n.type === "div" && typeof n.props.onMouseEnter === "function");
+  assert.equal(wraps.length, 1, "exactly one prompt-input hover wrapper");
+  return wraps[0];
+}
+
+
 // okData builds a canned ok action response.
 function okData(overrides) {
   return {
@@ -379,7 +425,115 @@ function openPanel(mounted) {
   return mounted.tree();
 }
 
+test("prompt input hides healthy amount while retaining the DeepSeek icon", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(0, okData({ display_prompt_input: true }));
+
+  const text = promptPillText(mounted.tree());
+  assert.ok(text.includes("DS"), "prompt pill carries the uppercase DeepSeek fallback icon");
+  assert.ok(!text.includes("¥110.00"), "healthy prompt balance hides the amount");
+  mounted.unmount();
+});
+
+test("prompt input suppresses amount at the warning threshold", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(
+    0,
+    okData({
+      display_prompt_input: true,
+      balance_infos: [{ currency: "CNY", total_balance: "10.00", granted_balance: "0.00", topped_up_balance: "10.00" }],
+    }),
+  );
+
+  assert.ok(promptPillText(mounted.tree()).includes("DS"), "threshold prompt pill keeps the icon");
+  assert.ok(!promptPillText(mounted.tree()).includes("¥10.00"), "threshold amount stays hidden");
+  mounted.unmount();
+});
+
+test("prompt input shows low amount and keeps its hover panel reachable", async () => {
+  const { plugin, timeouts, closeTimers } = loadPlugin();
+  const { mounted, resolveAction } = mountPromptPlugin(plugin, {
+    slotProps: { taskId: "task-1" },
+    rect: { top: 700, right: 300, bottom: 728, left: 272, width: 28, height: 28 },
+  });
+  await resolveAction(
+    0,
+    okData({
+      display_prompt_input: true,
+      balance_infos: [{ currency: "CNY", total_balance: "5.00", granted_balance: "0.00", topped_up_balance: "5.00" }],
+    }),
+  );
+
+  assert.ok(promptPillText(mounted.tree()).includes("¥5.00"), "low prompt balance shows the amount");
+
+  const wrap = promptWrapOf(mounted.tree());
+  wrap.props.onMouseEnter();
+  assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 1, "prompt hover opens the panel");
+
+  wrap.props.onMouseLeave();
+  assert.equal(timeouts.size, 1, "prompt mouseleave schedules close");
+  const panelWrap = everyElement(mounted.tree(), (n) => n.props && n.props.style && n.props.style.position === "fixed")[0];
+  assert.ok(panelWrap, "prompt fixed panel bridge exists");
+  assert.equal(panelWrap.props.style.bottom, "200px", "prompt panel sits directly above the trigger");
+  assert.equal(panelWrap.props.style.boxSizing, "border-box", "bridge padding stays inside the viewport clamp");
+  panelWrap.props.onMouseEnter();
+  assert.equal(closeTimers.size, 0, "entering the panel releases the canceled timer");
+  assert.equal(timeouts.size, 0, "entering the prompt panel cancels close");
+  mounted.unmount();
+});
+
 // ---------------------------------------------------------------------------
+
+test("prompt focus opens the detail panel", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(0, okData({ display_prompt_input: true }));
+
+  promptPillOf(mounted.tree()).props.onFocus();
+  assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 1, "focus opens the prompt panel");
+  mounted.unmount();
+});
+
+test("prompt hover then focus/click opens once and second click closes", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, actionCalls, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(0, okData({ display_prompt_input: true }));
+
+  promptWrapOf(mounted.tree()).props.onMouseEnter();
+  promptPillOf(mounted.tree()).props.onFocus();
+  promptPillOf(mounted.tree()).props.onClick();
+
+  assert.equal(actionCalls.length, 2, "hover/focus/click issues one follow-up load");
+  assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 1, "first click leaves panel open");
+
+  promptPillOf(mounted.tree()).props.onClick();
+  assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 0, "second click closes the panel");
+  mounted.unmount();
+});
+
+test("prompt focus followed by click keeps the panel open", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, actionCalls, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(0, okData({ display_prompt_input: true }));
+
+  promptPillOf(mounted.tree()).props.onFocus();
+  promptPillOf(mounted.tree()).props.onClick();
+  assert.equal(actionCalls.length, 2, "focus and click issue one follow-up load");
+  assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 1, "focus-then-click leaves panel open");
+  mounted.unmount();
+});
+
+test("prompt touch-style click opens without focus", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(0, okData({ display_prompt_input: true }));
+
+  promptPillOf(mounted.tree()).props.onClick();
+  assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 1, "touch-style click opens the panel");
+  mounted.unmount();
+});
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -431,7 +585,7 @@ test("pill renders the formatted primary-currency balance", async () => {
 
   const text = pillText(mounted.tree());
   assert.ok(text.includes("¥110.00"), "pill shows the formatted total, got: " + text);
-  assert.ok(text.includes("Ds"), "pill carries the DeepSeek monogram");
+  assert.ok(text.includes("DS"), "pill carries the uppercase DeepSeek fallback icon");
 });
 
 test("pill turns amber below the server-sent warn_below", async () => {
@@ -480,9 +634,9 @@ test("neutral checking state before the first snapshot", async () => {
   assert.equal(loading.length, 1, "loading state marked on the monogram");
 });
 
-test("unconfigured guidance renders in the panel", async () => {
+test("unconfigured guidance links to plugin settings", async () => {
   const { plugin } = loadPlugin();
-  const { mounted, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
+  const { mounted, resolveAction, navigateCalls } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
   await resolveAction(0, {
     status: "unconfigured",
     error: null,
@@ -498,6 +652,13 @@ test("unconfigured guidance renders in the panel", async () => {
   assert.match(panelText, /No API key configured\./);
   assert.match(panelText, /Settings → Plugins → DeepSeek API Balance/);
   assert.match(panelText, /DEEPSEEK_API_KEY/);
+
+  const links = everyElement(tree, (node) => node.type === "a" && node.props.href === CONFIG_SETTINGS_HREF);
+  assert.equal(links.length, 1, "configuration guidance has one settings link");
+  let defaultPrevented = false;
+  links[0].props.onClick({ preventDefault: () => { defaultPrevented = true; } });
+  assert.equal(defaultPrevented, true, "settings link uses SPA navigation");
+  assert.deepEqual(navigateCalls, [CONFIG_SETTINGS_HREF]);
 });
 
 test("loading state renders checking text in the panel", async () => {
@@ -508,7 +669,7 @@ test("loading state renders checking text in the panel", async () => {
   assert.match(renderedText(tree), /Checking balance…/);
 });
 
-test("status error with no snapshot renders neutral unavailable and the reason", async () => {
+test("status error with no snapshot links to plugin settings", async () => {
   const { plugin } = loadPlugin();
   const { mounted, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
   await resolveAction(0, {
@@ -528,6 +689,9 @@ test("status error with no snapshot renders neutral unavailable and the reason",
   const panelText = renderedText(tree);
   assert.match(panelText, /DeepSeek rejected the API key \(401\)/);
   assert.match(panelText, /Settings → Plugins → DeepSeek API Balance/);
+
+  const links = everyElement(tree, (node) => node.type === "a" && node.props.href === CONFIG_SETTINGS_HREF);
+  assert.equal(links.length, 1, "error guidance has one settings link");
 });
 
 test("error keeps the last-known render", async () => {
@@ -639,6 +803,18 @@ test("hover opens the panel and mouseleave schedules close via the padding-bridg
   assert.equal(byId(mounted.tree(), "deepseek-credits-refresh").length, 0, "panel closed after the timer fires");
 });
 
+test("unmount clears a pending topbar close timer", async () => {
+  const { plugin, timeouts } = loadPlugin();
+  const { mounted, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
+  await resolveAction(0, okData());
+
+  const wrap = everyElement(mounted.tree(), (n) => n.type === "div" && typeof n.props.onMouseEnter === "function")[0];
+  wrap.props.onMouseLeave();
+  assert.equal(timeouts.size, 1, "close timer is pending before unmount");
+  mounted.unmount();
+  assert.equal(timeouts.size, 0, "unmount clears the pending close timer");
+});
+
 test("click toggles the panel", async () => {
   const { plugin } = loadPlugin();
   const { mounted, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
@@ -707,18 +883,139 @@ test("a rejected invokeAction is transient: last render kept, next interval retr
   intervals.get(intervalId)();
   assert.equal(actionCalls.length, 3, "the next interval retries");
 });
+test("destroy clears timers and removes injected styles", async () => {
+  const { plugin, document, intervals, timeouts } = loadPlugin();
+  const { mounted, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
+  await resolveAction(0, okData());
 
-test("destroy clears the silent re-read timer and removes injected styles", async () => {
-  const { plugin, document, intervals } = loadPlugin();
-  const { mounted } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
+  const wrap = everyElement(mounted.tree(), (n) => n.type === "div" && typeof n.props.onMouseLeave === "function")[0];
+  wrap.props.onMouseLeave();
+  assert.equal(timeouts.size, 1, "topbar close timer is pending");
   assert.equal(intervals.size, 1);
 
   plugin.destroy();
   assert.equal(intervals.size, 0, "silent re-read timer cleared");
+  assert.equal(timeouts.size, 0, "topbar close timer cleared");
   assert.equal(document.styles.length, 0, "injected styles removed");
   mounted.unmount();
 });
 
+test("destroy clears a pending prompt close timer", async () => {
+  const { plugin, timeouts } = loadPlugin();
+  const { mounted, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
+  await resolveAction(0, okData({ display_prompt_input: true }));
+
+  promptWrapOf(mounted.tree()).props.onMouseLeave();
+  assert.equal(timeouts.size, 1, "prompt close timer is pending");
+  plugin.destroy();
+  assert.equal(timeouts.size, 0, "prompt close timer cleared");
+  mounted.unmount();
+});
+
+test("destroy blocks post-teardown events and prop-change timers", async () => {
+  const { plugin, intervals, timeouts } = loadPlugin();
+  const { mounted, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "ws-1" } });
+  await resolveAction(0, okData());
+
+  const wrap = everyElement(mounted.tree(), (n) => n.type === "div" && typeof n.props.onMouseLeave === "function")[0];
+  plugin.destroy();
+  wrap.props.onMouseLeave();
+  mounted.updateSlotProps({ workspaceId: "ws-2" });
+
+  assert.equal(timeouts.size, 0, "post-destroy events cannot schedule close timers");
+  assert.equal(intervals.size, 0, "post-destroy prop changes cannot add intervals");
+  mounted.unmount();
+});
+
+test("reinitialize isolates old component promises and handlers", async () => {
+  const { plugin } = loadPlugin();
+  const react = createReactApi();
+  const hostKit = makeHost({ React: react });
+  const components = [];
+  const registry = {
+    registerComponent(_slot, component) {
+      components.push(component);
+    },
+  };
+
+  plugin.initialize(registry, hostKit.host);
+  const oldMounted = mount(react, components[0], { slotProps: { workspaceId: "old-workspace" } });
+  plugin.destroy();
+
+  plugin.initialize(registry, hostKit.host);
+  const newMounted = mount(react, components[2], { slotProps: { workspaceId: "new-workspace" } });
+  await hostKit.resolveAction(0, okData());
+
+  assert.ok(!pillText(oldMounted.tree()).includes("¥110.00"), "old promise cannot update after reinitialize");
+  const oldWrap = everyElement(oldMounted.tree(), (n) => n.type === "div" && typeof n.props.onMouseEnter === "function")[0];
+  oldWrap.props.onMouseEnter();
+  assert.equal(hostKit.actionCalls.length, 2, "old handlers cannot issue actions after reinitialize");
+
+  oldMounted.unmount();
+  newMounted.unmount();
+  plugin.destroy();
+});
+
+test("workspace context switches ignore the old topbar response", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, actionCalls, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "workspace-a" } });
+
+  mounted.updateSlotProps({ workspaceId: "workspace-b" });
+  assert.equal(actionCalls.length, 2, "context switch starts a new balance request");
+  await resolveAction(
+    0,
+    okData({ balance_infos: [{ currency: "CNY", total_balance: "999.00" }] }),
+  );
+  assert.ok(!pillText(mounted.tree()).includes("¥999.00"), "old workspace response is ignored");
+  await resolveAction(
+    1,
+    okData({ balance_infos: [{ currency: "CNY", total_balance: "7.00" }] }),
+  );
+  assert.ok(pillText(mounted.tree()).includes("¥7.00"), "current workspace response is rendered");
+  mounted.unmount();
+});
+
+test("workspace context switches ignore a late old success after current response", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, actionCalls, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "workspace-a" } });
+
+  mounted.updateSlotProps({ workspaceId: "workspace-b" });
+  assert.equal(actionCalls.length, 2, "context switch starts a new balance request");
+  await resolveAction(
+    1,
+    okData({ balance_infos: [{ currency: "CNY", total_balance: "7.00" }] }),
+  );
+  assert.ok(pillText(mounted.tree()).includes("¥7.00"), "current workspace response is rendered first");
+  await resolveAction(
+    0,
+    okData({ balance_infos: [{ currency: "CNY", total_balance: "999.00" }] }),
+  );
+  assert.ok(pillText(mounted.tree()).includes("¥7.00"), "late old response cannot overwrite current data");
+  assert.ok(!pillText(mounted.tree()).includes("¥999.00"), "late old response is ignored");
+  mounted.unmount();
+});
+
+test("task context switches ignore the old prompt response", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, actionCalls, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-a" } });
+
+  mounted.updateSlotProps({ taskId: "task-b" });
+  assert.equal(actionCalls.length, 2, "task switch starts a new balance request");
+  await resolveAction(
+    0,
+    okData({ display_prompt_input: true, balance_infos: [{ currency: "CNY", total_balance: "999.00" }] }),
+  );
+  assert.equal(byId(mounted.tree(), "deepseek-credits-prompt-action").length, 0, "old task response is ignored");
+  await resolveAction(
+    1,
+    okData({
+      display_prompt_input: true,
+      balance_infos: [{ currency: "CNY", total_balance: "5.00", granted_balance: "0.00", topped_up_balance: "5.00" }],
+    }),
+  );
+  assert.ok(promptPillText(mounted.tree()).includes("¥5.00"), "current task response is rendered");
+  mounted.unmount();
+});
 // ---------------------------------------------------------------------------
 // Pure helper contracts
 // ---------------------------------------------------------------------------
@@ -744,4 +1041,26 @@ test("usagePopoverPosition anchors below the trigger and clamps to the viewport"
   // A trigger near the left edge clamps to the 8px margin.
   const clamped = { ...usagePopoverPosition({ top: 20, right: 100, bottom: 48 }, 1440, 900, "below") };
   assert.deepEqual(clamped, { top: 48, left: 8 });
+
+  const exactAbove = { ...usagePopoverPosition({ top: 340, right: 300, bottom: 368 }, 1440, 900, "above") };
+  assert.deepEqual(exactAbove, { bottom: 560, left: 28 }, "exact bridge-inclusive fit stays above");
+
+  const underAbove = { ...usagePopoverPosition({ top: 339, right: 300, bottom: 367 }, 1440, 900, "above") };
+  assert.deepEqual(underAbove, { top: 367, left: 28 }, "one pixel under fit flips below");
+  const above = { ...usagePopoverPosition({ top: 700, right: 300, bottom: 728 }, 1440, 900, "above") };
+  assert.deepEqual(above, { bottom: 200, left: 28 });
+
+  const promptNearTop = { ...usagePopoverPosition({ top: 20, right: 300, bottom: 48 }, 1440, 900, "above") };
+  assert.deepEqual(promptNearTop, { top: 48, left: 28 }, "prompt flips below when above space is insufficient");
+
+  const topbarNearBottom = { ...usagePopoverPosition({ top: 820, right: 300, bottom: 848 }, 1440, 900, "below") };
+  assert.deepEqual(topbarNearBottom, { bottom: 80, left: 28 }, "topbar flips above when below space is insufficient");
+  const topbarExact = { ...usagePopoverPosition({ top: 536, right: 300, bottom: 564 }, 1440, 900, "below", 8) };
+  assert.deepEqual(topbarExact, { top: 564, left: 28 }, "topbar uses its eight-pixel bridge in fit calculations");
+
+  const topbarUnder = { ...usagePopoverPosition({ top: 537, right: 300, bottom: 565 }, 1440, 900, "below", 8) };
+  assert.deepEqual(topbarUnder, { bottom: 363, left: 28 }, "topbar flips above one pixel under its fit boundary");
+
+  const narrow = { ...usagePopoverPosition({ top: 20, right: 260, bottom: 48 }, 260, 900, "below", 8) };
+  assert.deepEqual(narrow, { top: 48, left: 8, width: 244 }, "narrow viewports shrink the panel width");
 });
