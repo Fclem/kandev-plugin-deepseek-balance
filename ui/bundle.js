@@ -444,6 +444,7 @@ function makeTopBarBalance(host) {
       host.api
         .invokeAction("balance.get", input)
         .then(function (data) {
+          if (!isCurrent() || requestId !== requestSeq.current || contextRef.current !== requestWorkspace) return;
           setRefreshing(false);
           setState({ data: data, error: null, context: requestWorkspace });
         })

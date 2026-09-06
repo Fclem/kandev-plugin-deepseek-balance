@@ -975,6 +975,26 @@ test("workspace context switches ignore the old topbar response", async () => {
   mounted.unmount();
 });
 
+test("workspace context switches ignore a late old success after current response", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, actionCalls, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "workspace-a" } });
+
+  mounted.updateSlotProps({ workspaceId: "workspace-b" });
+  assert.equal(actionCalls.length, 2, "context switch starts a new balance request");
+  await resolveAction(
+    1,
+    okData({ balance_infos: [{ currency: "CNY", total_balance: "7.00" }] }),
+  );
+  assert.ok(pillText(mounted.tree()).includes("¥7.00"), "current workspace response is rendered first");
+  await resolveAction(
+    0,
+    okData({ balance_infos: [{ currency: "CNY", total_balance: "999.00" }] }),
+  );
+  assert.ok(pillText(mounted.tree()).includes("¥7.00"), "late old response cannot overwrite current data");
+  assert.ok(!pillText(mounted.tree()).includes("¥999.00"), "late old response is ignored");
+  mounted.unmount();
+});
+
 test("task context switches ignore the old prompt response", async () => {
   const { plugin } = loadPlugin();
   const { mounted, actionCalls, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-a" } });
