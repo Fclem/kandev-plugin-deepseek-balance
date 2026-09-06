@@ -68,6 +68,7 @@ curl -F package=@kandev-plugin-deepseek-balance-0.1.1.tar.gz \
 ```
 
 Kandev verifies the archive's internal `checksums.txt`, validates the manifest, and starts the binary matching the host platform.
+
 ## Configure
 
 Note the Makefile runs `plugin-pack` with `cd $(KANDEV_SDK) && go run
@@ -84,9 +85,27 @@ dependency the kandev backend grows. Building the tool where it lives keeps
 | --- | --- | --- |
 | **DeepSeek API key** | empty | Secret used only by the plugin backend for `GET https://api.deepseek.com/user/balance`. |
 | **Display · Task top right** | enabled | Shows the balance pill in the task session top bar. |
-| **Display · Prompt input** | disabled | Shows the balance action beside Send in the prompt toolbar. |
+| **Display · Prompt input** | disabled | Shows the balance action in the prompt toolbar beside Send. |
 
-Both display settings may be enabled simultaneously. The API key never reaches the browser.
+Both display settings may be enabled simultaneously. If the configured key is empty, the backend uses `DEEPSEEK_API_KEY` from its process environment when available.
+
+The balance webhook requires an authenticated Kandev identity. The API key is never returned to the browser, and DeepSeek response bodies are not copied into plugin errors.
+
+## Develop
+
+The Kandev plugin SDK is currently consumed from a sibling Kandev checkout:
+
+```sh
+curl -F package=@kandev-deepseek-credits-0.1.0.tar.gz \
+  http://localhost:<kandev-port>/api/plugins/install
+```
+
+kandev verifies `checksums.txt`, validates the manifest, extracts the package,
+spawns the host-matching binary, and — once the go-plugin handshake completes —
+marks the plugin active. Sideloaded plugins register **disabled/unverified**;
+enable yours in **Settings > Plugins** (the `plugins` feature flag must be on).
+Reinstalling the same version returns 409 — bump `version` in `manifest.yaml`
+(and the lockstep `VERSION` in the Makefile).
 
 ## Minimum host version
 
