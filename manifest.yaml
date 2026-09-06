@@ -8,7 +8,7 @@
 # three in sync when you rename.
 id: "kandev-plugin-deepseek-balance"
 api_version: 1
-version: "0.1.0"
+version: "0.1.1"
 display_name: "DeepSeek API Balance"
 description: "Shows DeepSeek API balance and credit breakdown in configurable task and prompt locations."
 author: "Fclem"
