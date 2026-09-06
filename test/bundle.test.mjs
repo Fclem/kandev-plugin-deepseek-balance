@@ -1,4 +1,4 @@
-// DeepSeek Credits bundle tests — node --test + vm, host mock, no browser.
+// DeepSeek API Balance bundle tests — node --test + vm, host mock, no browser.
 // Covers the task-05 acceptance matrix: slot registration, pill rendering and
 // colors, panel content, hover/click mechanics, invokeAction argument shape,
 // transient-error handling, and destroy cleanup.
@@ -394,7 +394,22 @@ test("registers exactly the chat-top-bar component slot", () => {
     },
     {},
   );
-  assert.deepEqual(slots, ["chat-top-bar"]);
+  assert.deepEqual(slots, ["chat-top-bar", "chat-input-actions"]);
+});
+
+test("prompt input action renders when enabled", async () => {
+  const { plugin } = loadPlugin();
+  const react = createReactApi();
+  const hostKit = makeHost({ React: react });
+  const components = [];
+  plugin.initialize(
+    { registerComponent(_slot, component) { components.push(component); } },
+    hostKit.host,
+  );
+  const mounted = mount(react, components[1], { slotProps: { taskId: "task-1" } });
+  await hostKit.resolveAction(0, okData({ display_prompt_input: true }));
+  assert.equal(byId(mounted.tree(), "deepseek-credits-prompt-action").length, 1);
+  mounted.unmount();
 });
 
 test("topbar styles enforce desktop and phone geometry", () => {
@@ -481,7 +496,7 @@ test("unconfigured guidance renders in the panel", async () => {
   const tree = openPanel(mounted);
   const panelText = renderedText(tree);
   assert.match(panelText, /No API key configured\./);
-  assert.match(panelText, /Settings → Plugins → DeepSeek Credits/);
+  assert.match(panelText, /Settings → Plugins → DeepSeek API Balance/);
   assert.match(panelText, /DEEPSEEK_API_KEY/);
 });
 
@@ -512,7 +527,7 @@ test("status error with no snapshot renders neutral unavailable and the reason",
   const tree = openPanel(mounted);
   const panelText = renderedText(tree);
   assert.match(panelText, /DeepSeek rejected the API key \(401\)/);
-  assert.match(panelText, /Settings → Plugins → DeepSeek Credits/);
+  assert.match(panelText, /Settings → Plugins → DeepSeek API Balance/);
 });
 
 test("error keeps the last-known render", async () => {

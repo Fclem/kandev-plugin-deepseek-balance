@@ -75,13 +75,11 @@ func loadManifest(t *testing.T) manifest {
 func TestManifest_IdentityContract(t *testing.T) {
 	m := loadManifest(t)
 
-	require.Equal(t, "kandev-deepseek-credits", m.ID)
-	require.Equal(t, "DeepSeek Credits", m.DisplayName, "pinned: the panel's Settings-path copy and task-07 navigation reference it")
-	require.Equal(t, "DeepSeek API balance and remaining credits in the session top bar.", m.Description,
-		"exact spec string; a divergent-but-non-empty description is precisely the wrong-but-valid value this test exists to catch")
-	require.Equal(t, "kandev", m.Author, "NOT the template's your-name-here")
-	require.Equal(t, "https://github.com/kdlbs/kandev-plugin-deepseek-credits", m.RepoURL,
-		"the host renders repo_url as the Repo link on the installed-plugin list")
+	require.Equal(t, "kandev-plugin-deepseek-balance", m.ID)
+	require.Equal(t, "DeepSeek API Balance", m.DisplayName)
+	require.Equal(t, "Shows DeepSeek API balance and credit breakdown in configurable task and prompt locations.", m.Description)
+	require.Equal(t, "Fclem", m.Author)
+	require.Equal(t, "https://github.com/Fclem/kandev-plugin-deepseek-balance", m.RepoURL)
 	require.Equal(t, 1, m.APIVersion)
 	require.Regexp(t, regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`), m.Version, "SemVer shape, not an exact value: the release workflow bumps it and re-runs tests on the tag")
 	require.Equal(t, "0.88.0", m.MinKandevVersion,
@@ -106,18 +104,22 @@ func TestManifest_RuntimeAndUI(t *testing.T) {
 func TestManifest_ActionsContract(t *testing.T) {
 	m := loadManifest(t)
 
-	require.Len(t, m.Actions, 1, "a second undeclared action must fail this test")
+	require.Len(t, m.Actions, 2)
 	a := m.Actions[0]
 	require.Equal(t, "balance.get", a.Key)
 	require.Equal(t, "workspace", a.Scope, "the current manifest field name; resource_scope is the pre-release legacy spelling")
 	require.Equal(t, 1024, a.MaxBodyBytes)
+	taskAction := m.Actions[1]
+	require.Equal(t, "balance.get.task", taskAction.Key)
+	require.Equal(t, "task", taskAction.Scope)
+	require.Equal(t, 1024, taskAction.MaxBodyBytes)
 }
 
 func TestManifest_ConfigSchemaContract(t *testing.T) {
 	m := loadManifest(t)
 
 	require.Equal(t, "object", m.Config.Type)
-	require.Len(t, m.Config.Properties, 3)
+	require.Len(t, m.Config.Properties, 5)
 
 	apiKey, ok := m.Config.Properties["api_key"]
 	require.True(t, ok, "api_key property must exist")
@@ -141,6 +143,18 @@ func TestManifest_ConfigSchemaContract(t *testing.T) {
 	require.Equal(t, 10, warn.Default)
 	require.Equal(t, "Warn threshold", warn.Title)
 	require.NotEmpty(t, warn.Description)
+
+	top, ok := m.Config.Properties["display_task_top_right"]
+	require.True(t, ok)
+	require.Equal(t, "boolean", top.Type)
+	require.Equal(t, true, top.Default)
+	require.Equal(t, "Display · Task top right", top.Title)
+
+	prompt, ok := m.Config.Properties["display_prompt_input"]
+	require.True(t, ok)
+	require.Equal(t, "boolean", prompt.Type)
+	require.Equal(t, false, prompt.Default)
+	require.Equal(t, "Display · Prompt input", prompt.Title)
 }
 
 func TestManifest_NoWebhooksNoCapabilities(t *testing.T) {

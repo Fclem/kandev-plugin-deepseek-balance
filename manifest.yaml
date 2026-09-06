@@ -6,14 +6,14 @@
 # window.registerKandevPlugin(...) in ui/bundle.js, and it is the prefix of
 # every route kandev serves for this plugin (/api/plugins/<id>/...). Keep the
 # three in sync when you rename.
-id: "kandev-deepseek-credits"
+id: "kandev-plugin-deepseek-balance"
 api_version: 1
 version: "0.1.0"
-display_name: "DeepSeek Credits"
-description: "DeepSeek API balance and remaining credits in the session top bar."
-author: "kandev"
+display_name: "DeepSeek API Balance"
+description: "Shows DeepSeek API balance and credit breakdown in configurable task and prompt locations."
+author: "Fclem"
 categories: ["analytics"]
-repo_url: "https://github.com/kdlbs/kandev-plugin-deepseek-credits"
+repo_url: "https://github.com/Fclem/kandev-plugin-deepseek-balance"
 
 # min_kandev_version is the oldest kandev release this plugin will install
 # against. A release host compares it to its own version at install time and
@@ -53,7 +53,7 @@ ui:
   bundle: "/ui/bundle.js"
 
 # config_schema declares operator-editable settings, rendered as a form at
-# Settings > Plugins > DeepSeek Credits. The plugin process reads saved values
+# Settings > Plugins > DeepSeek API Balance. The plugin process reads saved values
 # through the Host GetConfig RPC. Fields marked `secret: true` render as
 # password inputs, are stored in kandev's encrypted vault, and are masked
 # everywhere except inside the plugin process.
@@ -77,11 +77,24 @@ config_schema:
       default: 10
       title: "Warn threshold"
       description: "The pill turns amber when the primary-currency total balance falls below this amount. Default 10."
+    display_task_top_right:
+      type: boolean
+      default: true
+      title: "Display · Task top right"
+      description: "Show the balance pill in the task session top bar."
+    display_prompt_input:
+      type: boolean
+      default: false
+      title: "Display · Prompt input"
+      description: "Show the balance pill in the prompt toolbar next to the send button."
 
-# One authenticated action, workspace-scoped. The host authenticates the
-# caller and verifies workspace visibility before the plugin is invoked; the
-# bounded request body travels in the action envelope's `body` field.
+# Authenticated actions. The workspace action serves the task top bar; the
+# task-scoped variant serves the prompt toolbar, whose slot context provides a
+# task id but not a workspace id.
 actions:
   - key: balance.get
     scope: workspace
+    max_body_bytes: 1024
+  - key: balance.get.task
+    scope: task
     max_body_bytes: 1024

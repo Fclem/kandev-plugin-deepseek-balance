@@ -4,10 +4,10 @@
 
 # When you rename the plugin, update BIN and VERSION to match manifest.yaml's
 # id and version (PKG_OUT is derived from them).
-BIN := bin/kandev-deepseek-credits
+BIN := bin/kandev-plugin-deepseek-balance
 VERSION := 0.1.0
 STAGE := .build/stage
-PKG_OUT := kandev-deepseek-credits-$(VERSION).tar.gz
+PKG_OUT := kandev-plugin-deepseek-balance-$(VERSION).tar.gz
 
 # The sibling kandev checkout the `replace` in go.mod points at. Packaging runs
 # plugin-pack inside kandev's module because the tool imports substantially more
@@ -114,4 +114,4 @@ verify-package-host: package-host
 		fi
 
 clean:
-	rm -rf bin $(STAGE) kandev-deepseek-credits-*.tar.gz
+	rm -rf bin $(STAGE) kandev-plugin-deepseek-balance-*.tar.gz

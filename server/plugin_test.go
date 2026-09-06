@@ -612,6 +612,31 @@ func TestWarnBelow_DefaultsAndParsing(t *testing.T) {
 	}
 }
 
+func TestDisplayOptionsDefaultAndConfigured(t *testing.T) {
+	cases := []struct {
+		name   string
+		cfg    map[string]any
+		top    bool
+		prompt bool
+	}{
+		{"defaults", map[string]any{}, true, false},
+		{"configured", map[string]any{
+			configKeyDisplayTaskTopRight: false,
+			configKeyDisplayPromptInput:  true,
+		}, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, _ := newTestPlugin(t, tc.cfg, &fakeFetcher{}, true)
+			resp, err := p.HandleAction(context.Background(), actionReq(`{}`))
+			require.NoError(t, err)
+			v := decodeResponse(t, resp)
+			require.Equal(t, tc.top, field(v, configKeyDisplayTaskTopRight))
+			require.Equal(t, tc.prompt, field(v, configKeyDisplayPromptInput))
+		})
+	}
+}
+
 func TestPollMinutes_Floor(t *testing.T) {
 	cfg := func(v any) map[string]any { return map[string]any{"api_key": "sk-abc", "poll_minutes": v} }
 	cases := []struct {

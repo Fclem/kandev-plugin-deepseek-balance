@@ -1,4 +1,4 @@
-// DeepSeek Credits — kandev plugin UI bundle.
+// DeepSeek API Balance — kandev plugin UI bundle.
 //
 // Hand-written, NO-BUILD plain-JS ES module (shared host React via host.jsx —
 // never bundles its own React). Registers one component:
@@ -9,18 +9,19 @@
 //     breakdown, every currency entry, the is_available status, the
 //     last-updated time, and a Refresh control.
 //
-// All data comes from this plugin's Go backend through the authenticated,
-// workspace-scoped `balance.get` action (host.api.invokeAction) — this bundle
-// only renders the response. The action body carries the forced-refresh flag
-// ({ refresh: true }) because the host action envelope (ActionInput) has no
-// free-form keys.
+// All data comes from this plugin's Go backend through authenticated actions.
+// The top bar uses the workspace-scoped action; the prompt toolbar uses the
+// task-scoped variant because its slot context provides a task id only.
+// The action body carries the forced-refresh flag ({ refresh: true }) because
+// the host action envelope has no free-form keys.
 
 // AUTO_REFRESH_MS is how often the UI silently re-reads the backend's warm
 // snapshot (no body, no forced rebuild) so an open panel / the pill keep up
 // with the server-side poller without forcing DeepSeek round trips.
 var AUTO_REFRESH_MS = 60 * 1000;
-var TOPBAR_STYLE_ID = "kandev-deepseek-credits-topbar-style";
+var TOPBAR_STYLE_ID = "kandev-plugin-deepseek-balance-topbar-style";
 var TOPBAR_ID = "deepseek-credits-topbar";
+var PROMPT_ID = "deepseek-credits-prompt-action";
 var PANEL_WIDTH = 272;
 
 var TOPBAR_CSS =
@@ -107,6 +108,11 @@ function pillTone(d) {
 function pillState(d) {
   if (!d) return "loading";
   return d.status || "loading";
+}
+function displayEnabled(data, surface) {
+  if (surface === "task-top-right") return !data || data.display_task_top_right !== false;
+  if (surface === "prompt-input") return Boolean(data && data.display_prompt_input === true);
+  return false;
 }
 
 // usagePopoverPosition anchors the fixed panel below the trigger rect, clamped
@@ -210,7 +216,7 @@ function panelBody(h, ui, host, d, refreshing, onRefresh) {
     "div",
     { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" } },
     monogram(h, 18, { tone: COLOR.brand }),
-    h("span", { style: { fontWeight: 600, fontSize: "13px" } }, "DeepSeek Credits"),
+    h("span", { style: { fontWeight: 600, fontSize: "13px" } }, "DeepSeek API Balance"),
   );
 
   var body = [];
@@ -222,7 +228,7 @@ function panelBody(h, ui, host, d, refreshing, onRefresh) {
         { style: { fontSize: "12px", lineHeight: 1.5, color: "var(--muted-foreground)" } },
         "No API key configured.",
         h("br"),
-        "Set it in Settings → Plugins → DeepSeek Credits, or provide the DEEPSEEK_API_KEY environment variable.",
+        "Set it in Settings → Plugins → DeepSeek API Balance, or provide the DEEPSEEK_API_KEY environment variable.",
       ),
     );
   } else if (status === "loading") {
@@ -292,7 +298,7 @@ function panelBody(h, ui, host, d, refreshing, onRefresh) {
       if (!hasBalance) {
         body.push(
           h("div", { style: { fontSize: "12px", lineHeight: 1.5, color: "var(--muted-foreground)", marginTop: "4px" } },
-            "Check the key in Settings → Plugins → DeepSeek Credits, or the DEEPSEEK_API_KEY environment variable."),
+            "Check the key in Settings → Plugins → DeepSeek API Balance, or the DEEPSEEK_API_KEY environment variable."),
         );
       }
     }
@@ -443,6 +449,7 @@ function makeTopBarBalance(host) {
     if (!workspaceId) return null;
 
     var d = state.data;
+    if (!displayEnabled(d, "task-top-right")) return null;
 
     return h(
       "div",
@@ -455,7 +462,7 @@ function makeTopBarBalance(host) {
           variant: "outline",
           size: "sm",
           className: "h-6 gap-1.5 px-2 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground",
-          "aria-label": "DeepSeek Credits balance",
+          "aria-label": "DeepSeek API balance",
           onFocus: openNow,
           onClick: toggle,
         },
@@ -480,11 +487,125 @@ function makeTopBarBalance(host) {
   };
 }
 
+function makePromptBalance(host) {
+  var React = host.React;
+  var h = host.jsx;
+  var ui = host.ui;
+
+  return function PromptBalance(props) {
+    var ctx = (props && props.slotProps) || {};
+    var taskId = ctx.taskId || "";
+    var stateHook = React.useState({ data: null });
+    var state = stateHook[0];
+    var setState = stateHook[1];
+    var openHook = React.useState(false);
+    var open = openHook[0];
+    var setOpen = openHook[1];
+    var posHook = React.useState({ top: 0, left: 0 });
+    var pos = posHook[0];
+    var setPos = posHook[1];
+    var refreshingHook = React.useState(false);
+    var refreshing = refreshingHook[0];
+    var setRefreshing = refreshingHook[1];
+    var wrapRef = React.useRef(null);
+    var closeTimer = React.useRef(null);
+
+    function load(force) {
+      if (!taskId) return;
+      if (force) setRefreshing(true);
+      host.api.invokeAction("balance.get.task", {
+        taskId: taskId,
+        body: force ? { refresh: true } : undefined,
+      }).then(function (data) {
+        setRefreshing(false);
+        setState({ data: data });
+      }).catch(function () {
+        setRefreshing(false);
+      });
+    }
+
+    React.useEffect(function () {
+      load(false);
+      var id = setInterval(function () { load(false); }, AUTO_REFRESH_MS);
+      activeIntervals.add(id);
+      return function () {
+        clearInterval(id);
+        activeIntervals.delete(id);
+        if (closeTimer.current) clearTimeout(closeTimer.current);
+      };
+    }, [taskId]);
+
+    function reposition() {
+      var element = wrapRef.current;
+      if (!element || !element.getBoundingClientRect) return;
+      setPos(usagePopoverPosition(element.getBoundingClientRect(), window.innerWidth, window.innerHeight, "above"));
+    }
+    function cancelClose() {
+      if (closeTimer.current) {
+        clearTimeout(closeTimer.current);
+        closeTimer.current = null;
+      }
+    }
+    function openNow() {
+      cancelClose();
+      reposition();
+      setOpen(true);
+      load(false);
+    }
+    function scheduleClose() {
+      cancelClose();
+      closeTimer.current = setTimeout(function () { setOpen(false); }, 260);
+    }
+    function toggle() {
+      if (open) setOpen(false);
+      else openNow();
+    }
+
+    var d = state.data;
+    if (!taskId || !displayEnabled(d, "prompt-input")) return null;
+
+    return h(
+      "div",
+      { ref: wrapRef, style: { display: "inline-flex" }, onMouseEnter: openNow, onMouseLeave: scheduleClose },
+      h(
+        ui.Button,
+        {
+          id: PROMPT_ID,
+          type: "button",
+          variant: "ghost",
+          size: "sm",
+          className: "h-7 gap-1.5 px-1.5 text-xs text-muted-foreground hover:bg-primary/10 hover:text-foreground",
+          "aria-label": "DeepSeek API balance",
+          onFocus: openNow,
+          onClick: toggle,
+        },
+        pillContent(h, d),
+      ),
+      open
+        ? h(
+            "div",
+            {
+              onMouseEnter: cancelClose,
+              onMouseLeave: scheduleClose,
+              style: { position: "fixed", bottom: (window.innerHeight - pos.bottom) + "px", left: pos.left + "px", zIndex: 9999, paddingBottom: "8px" },
+            },
+            h(
+              ui.Card,
+              { style: { padding: "13px 14px", boxShadow: "0 10px 28px rgba(15,20,40,0.20)", width: PANEL_WIDTH + "px" } },
+              panelBody(h, ui, host, d, refreshing, function () { load(true); }),
+            ),
+          )
+        : null,
+    );
+  };
+}
+
 // ==========================================================================
-window.registerKandevPlugin("kandev-deepseek-credits", {
+window.registerKandevPlugin("kandev-plugin-deepseek-balance", {
   initialize: function (registry, host) {
     injectTopbarStyles();
     registry.registerComponent("chat-top-bar", makeTopBarBalance(host));
+    registry.registerComponent("chat-input-actions", makePromptBalance(host));
   },
   destroy: function () {
     activeIntervals.forEach(clearInterval);
