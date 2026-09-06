@@ -26,6 +26,7 @@ var CONFIG_SETTINGS_HREF = "/settings/plugins/kandev-plugin-deepseek-balance";
 var PANEL_WIDTH = 272;
 var PANEL_HEIGHT = 320;
 var PANEL_BRIDGE = 12;
+var TOPBAR_PANEL_BRIDGE = 8;
 
 var TOPBAR_CSS =
   "#deepseek-credits-topbar{height:28px;min-height:28px}" +
@@ -122,23 +123,28 @@ function displayEnabled(data, surface) {
 }
 
 // usagePopoverPosition anchors a fixed panel above or below the trigger,
-// choosing the side with room and clamping the panel within the viewport.
-function usagePopoverPosition(rect, viewportWidth, viewportHeight, placement) {
-  var left = Math.max(8, Math.min(rect.right - PANEL_WIDTH, viewportWidth - PANEL_WIDTH - 8));
+function usagePopoverPosition(rect, viewportWidth, viewportHeight, placement, bridge) {
   var margin = 8;
+  var panelWidth = Math.min(PANEL_WIDTH, Math.max(0, viewportWidth - margin * 2));
+  var left = Math.max(margin, Math.min(rect.right - panelWidth, viewportWidth - panelWidth - margin));
+  var panelBridge = typeof bridge === "number" ? bridge : PANEL_BRIDGE;
   var aboveSpace = rect.top;
   var belowSpace = viewportHeight - rect.bottom;
-  var aboveFits = aboveSpace >= PANEL_HEIGHT + PANEL_BRIDGE + margin;
-  var belowFits = belowSpace >= PANEL_HEIGHT + PANEL_BRIDGE + margin;
+  var aboveFits = aboveSpace >= PANEL_HEIGHT + panelBridge + margin;
+  var belowFits = belowSpace >= PANEL_HEIGHT + panelBridge + margin;
   var chosen = placement === "above" ? "above" : "below";
   if (chosen === "above" && !aboveFits && belowFits) chosen = "below";
   if (chosen === "below" && !belowFits && aboveFits) chosen = "above";
-  var maxTop = Math.max(margin, viewportHeight - PANEL_HEIGHT - PANEL_BRIDGE - margin);
+  var maxTop = Math.max(margin, viewportHeight - PANEL_HEIGHT - panelBridge - margin);
+  var position;
   if (chosen === "above") {
     var desiredBottom = viewportHeight - rect.top;
-    return { bottom: Math.max(margin, Math.min(desiredBottom, maxTop)), left: left };
+    position = { bottom: Math.max(margin, Math.min(desiredBottom, maxTop)), left: left };
+  } else {
+    position = { top: Math.max(margin, Math.min(rect.bottom, maxTop)), left: left };
   }
-  return { top: Math.max(margin, Math.min(rect.bottom, maxTop)), left: left };
+  if (panelWidth !== PANEL_WIDTH) position.width = panelWidth;
+  return position;
 }
 
 // monogram renders the DeepSeek chip: a brand-hue rounded square with the
@@ -416,6 +422,9 @@ function makeTopBarBalance(host) {
     var setRefreshing = refreshingHook[1];
     var wrapRef = React.useRef(null);
     var closeTimer = React.useRef(null);
+    var requestSeq = React.useRef(0);
+    var contextRef = React.useRef(workspaceId);
+    contextRef.current = workspaceId;
     // fetchBalance reads the balance.get action. A forced refresh travels in
     // the action body ({ refresh: true }); the silent path sends no body so it
     // serves the backend's cached snapshot. A rejection (non-2xx, host 504,
@@ -425,7 +434,9 @@ function makeTopBarBalance(host) {
     function fetchBalance(opts) {
       if (!isCurrent()) return;
       opts = opts || {};
-      var input = { workspaceId: workspaceId };
+      var requestWorkspace = workspaceId;
+      var requestId = ++requestSeq.current;
+      var input = { workspaceId: requestWorkspace };
       if (opts.refresh) {
         input.body = { refresh: true };
         setRefreshing(true);
@@ -433,14 +444,13 @@ function makeTopBarBalance(host) {
       host.api
         .invokeAction("balance.get", input)
         .then(function (data) {
-          if (!isCurrent()) return;
           setRefreshing(false);
-          setState({ data: data, error: null });
+          setState({ data: data, error: null, context: requestWorkspace });
         })
         .catch(function () {
-          if (!isCurrent()) return;
+          if (!isCurrent() || requestId !== requestSeq.current || contextRef.current !== requestWorkspace) return;
           setRefreshing(false);
-          setState(function (s) { return { data: s.data, error: true }; });
+          setState(function (s) { return { data: s.data, error: true, context: requestWorkspace }; });
         });
     }
 
@@ -448,8 +458,9 @@ function makeTopBarBalance(host) {
       if (!workspaceId) return; // workspace-scoped action: no workspace, no fetch
       fetchBalance({ refresh: !!force });
     }
-
     React.useEffect(function () {
+      if (!isCurrent()) return;
+      requestSeq.current += 1;
       load(false);
     }, [workspaceId]);
 
@@ -473,7 +484,7 @@ function makeTopBarBalance(host) {
       // No vertical gap: the fixed container starts at the trigger's bottom
       // and bridges to the card with transparent padding, so the mouse never
       // leaves the hover area on the way down.
-      setPos(usagePopoverPosition(r, window.innerWidth, window.innerHeight, "below"));
+      setPos(usagePopoverPosition(r, window.innerWidth, window.innerHeight, "below", TOPBAR_PANEL_BRIDGE));
     }
     function cancelClose() {
       clearTimeout(closeTimer.current);
@@ -511,7 +522,9 @@ function makeTopBarBalance(host) {
     // scoped action with no selector would be rejected with 400 and retried).
     if (!workspaceId) return null;
 
-    var d = state.data;
+    var contextMatches = state.context == null || state.context === workspaceId;
+    var d = contextMatches ? state.data : null;
+    var panelOpen = open && contextMatches;
     if (!displayEnabled(d, "task-top-right")) return null;
 
     return h(
@@ -531,7 +544,7 @@ function makeTopBarBalance(host) {
         },
         pillContent(h, d),
       ),
-      open
+      panelOpen
         ? h(
             "div",
             {
@@ -551,7 +564,7 @@ function makeTopBarBalance(host) {
             },
             h(
               ui.Card,
-              { style: { padding: "13px 14px", boxShadow: "0 10px 28px rgba(15,20,40,0.20)", width: PANEL_WIDTH + "px" } },
+              { style: { padding: "13px 14px", boxShadow: "0 10px 28px rgba(15,20,40,0.20)", width: (pos.width || PANEL_WIDTH) + "px" } },
               panelBody(h, ui, host, d, refreshing, function () { load(true); }),
             ),
           )
@@ -587,25 +600,35 @@ function makePromptBalance(host) {
     var wrapRef = React.useRef(null);
     var closeTimer = React.useRef(null);
     var focusOpened = React.useRef(false);
+    var requestSeq = React.useRef(0);
+    var contextRef = React.useRef(taskId);
+    contextRef.current = taskId;
     function load(force) {
       if (!isCurrent() || !taskId) return;
+      var requestTask = taskId;
+      var requestId = ++requestSeq.current;
       if (force) setRefreshing(true);
       host.api.invokeAction("balance.get.task", {
-        taskId: taskId,
+        taskId: requestTask,
         body: force ? { refresh: true } : undefined,
       }).then(function (data) {
-        if (!isCurrent()) return;
+        if (!isCurrent() || requestId !== requestSeq.current || contextRef.current !== requestTask) return;
         setRefreshing(false);
-        setState({ data: data });
+        setState({ data: data, context: requestTask });
       }).catch(function () {
-        if (!isCurrent()) return;
+        if (!isCurrent() || requestId !== requestSeq.current || contextRef.current !== requestTask) return;
         setRefreshing(false);
       });
+
     }
+    React.useEffect(function () {
+      if (!isCurrent()) return;
+      requestSeq.current += 1;
+      load(false);
+    }, [taskId]);
 
     React.useEffect(function () {
       if (!isCurrent() || !taskId) return;
-      load(false);
       var id = setInterval(function () { load(false); }, AUTO_REFRESH_MS);
       activeIntervals.add(id);
       return function () {
@@ -615,12 +638,12 @@ function makePromptBalance(host) {
         activeCloseTimers.delete(closeTimer.current);
         closeTimer.current = null;
       };
-    }, [taskId]);
 
+    }, [taskId]);
     function reposition() {
       var element = wrapRef.current;
       if (!element || !element.getBoundingClientRect) return;
-      setPos(usagePopoverPosition(element.getBoundingClientRect(), window.innerWidth, window.innerHeight, "above"));
+      setPos(usagePopoverPosition(element.getBoundingClientRect(), window.innerWidth, window.innerHeight, "above", PANEL_BRIDGE));
     }
     function cancelClose() {
       clearTimeout(closeTimer.current);
@@ -666,8 +689,9 @@ function makePromptBalance(host) {
         openNow();
       }
     }
-
-    var d = state.data;
+    var contextMatches = state.context == null || state.context === taskId;
+    var d = contextMatches ? state.data : null;
+    var panelOpen = open && contextMatches;
     if (!taskId || !displayEnabled(d, "prompt-input")) return null;
     return h(
       "div",
@@ -693,7 +717,7 @@ function makePromptBalance(host) {
         },
         pillContent(h, d, { showAmount: promptShowsAmount(d) }),
       ),
-      open
+      panelOpen
         ? h(
             "div",
             {
@@ -714,7 +738,7 @@ function makePromptBalance(host) {
             },
             h(
               ui.Card,
-              { style: { padding: "13px 14px", boxShadow: "0 10px 28px rgba(15,20,40,0.20)", width: PANEL_WIDTH + "px" } },
+              { style: { padding: "13px 14px", boxShadow: "0 10px 28px rgba(15,20,40,0.20)", width: (pos.width || PANEL_WIDTH) + "px" } },
               panelBody(h, ui, host, d, refreshing, function () { load(true); }),
             ),
           )

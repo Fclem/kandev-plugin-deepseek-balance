@@ -956,6 +956,46 @@ test("reinitialize isolates old component promises and handlers", async () => {
   plugin.destroy();
 });
 
+test("workspace context switches ignore the old topbar response", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, actionCalls, resolveAction } = mountPlugin(plugin, { slotProps: { workspaceId: "workspace-a" } });
+
+  mounted.updateSlotProps({ workspaceId: "workspace-b" });
+  assert.equal(actionCalls.length, 2, "context switch starts a new balance request");
+  await resolveAction(
+    0,
+    okData({ balance_infos: [{ currency: "CNY", total_balance: "999.00" }] }),
+  );
+  assert.ok(!pillText(mounted.tree()).includes("¥999.00"), "old workspace response is ignored");
+  await resolveAction(
+    1,
+    okData({ balance_infos: [{ currency: "CNY", total_balance: "7.00" }] }),
+  );
+  assert.ok(pillText(mounted.tree()).includes("¥7.00"), "current workspace response is rendered");
+  mounted.unmount();
+});
+
+test("task context switches ignore the old prompt response", async () => {
+  const { plugin } = loadPlugin();
+  const { mounted, actionCalls, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-a" } });
+
+  mounted.updateSlotProps({ taskId: "task-b" });
+  assert.equal(actionCalls.length, 2, "task switch starts a new balance request");
+  await resolveAction(
+    0,
+    okData({ display_prompt_input: true, balance_infos: [{ currency: "CNY", total_balance: "999.00" }] }),
+  );
+  assert.equal(byId(mounted.tree(), "deepseek-credits-prompt-action").length, 0, "old task response is ignored");
+  await resolveAction(
+    1,
+    okData({
+      display_prompt_input: true,
+      balance_infos: [{ currency: "CNY", total_balance: "5.00", granted_balance: "0.00", topped_up_balance: "5.00" }],
+    }),
+  );
+  assert.ok(promptPillText(mounted.tree()).includes("¥5.00"), "current task response is rendered");
+  mounted.unmount();
+});
 // ---------------------------------------------------------------------------
 // Pure helper contracts
 // ---------------------------------------------------------------------------
@@ -995,4 +1035,12 @@ test("usagePopoverPosition anchors below the trigger and clamps to the viewport"
 
   const topbarNearBottom = { ...usagePopoverPosition({ top: 820, right: 300, bottom: 848 }, 1440, 900, "below") };
   assert.deepEqual(topbarNearBottom, { bottom: 80, left: 28 }, "topbar flips above when below space is insufficient");
+  const topbarExact = { ...usagePopoverPosition({ top: 536, right: 300, bottom: 564 }, 1440, 900, "below", 8) };
+  assert.deepEqual(topbarExact, { top: 564, left: 28 }, "topbar uses its eight-pixel bridge in fit calculations");
+
+  const topbarUnder = { ...usagePopoverPosition({ top: 537, right: 300, bottom: 565 }, 1440, 900, "below", 8) };
+  assert.deepEqual(topbarUnder, { bottom: 363, left: 28 }, "topbar flips above one pixel under its fit boundary");
+
+  const narrow = { ...usagePopoverPosition({ top: 20, right: 260, bottom: 48 }, 260, 900, "below", 8) };
+  assert.deepEqual(narrow, { top: 48, left: 8, width: 244 }, "narrow viewports shrink the panel width");
 });
