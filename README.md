@@ -68,7 +68,6 @@ curl -F package=@kandev-plugin-deepseek-balance-0.1.1.tar.gz \
 ```
 
 Kandev verifies the archive's internal `checksums.txt`, validates the manifest, and starts the binary matching the host platform.
-
 ## Configure
 
 Note the Makefile runs `plugin-pack` with `cd $(KANDEV_SDK) && go run
