@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3] - 2026-09-07
+
+### Changed
+
+- feat: use DeepSeek whale logo in usage pills (50ef630)
+
+
 ## [0.1.2] - 2026-09-06
 
 ### Changed

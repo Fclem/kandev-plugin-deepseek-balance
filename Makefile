@@ -5,7 +5,7 @@
 # When you rename the plugin, update BIN and VERSION to match manifest.yaml's
 # id and version (PKG_OUT is derived from them).
 BIN := bin/kandev-plugin-deepseek-balance
-VERSION := 0.1.2
+VERSION := 0.1.3
 STAGE := .build/stage
 PKG_OUT := kandev-plugin-deepseek-balance-$(VERSION).tar.gz
 

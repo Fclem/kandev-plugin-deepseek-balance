@@ -60,10 +60,10 @@ make vet                 # go vet ./server/...
 make verify-package-host # validate a host-only tarball and checksums
 ```
 
-Install `kandev-plugin-deepseek-balance-0.1.2.tar.gz` through **Settings → Plugins → Install plugin**, or with the operator API:
+Install `kandev-plugin-deepseek-balance-0.1.3.tar.gz` through **Settings → Plugins → Install plugin**, or with the operator API:
 
 ```sh
-curl -F package=@kandev-plugin-deepseek-balance-0.1.2.tar.gz \
+curl -F package=@kandev-plugin-deepseek-balance-0.1.3.tar.gz \
   http://localhost:8080/api/plugins/install
 ```
 
