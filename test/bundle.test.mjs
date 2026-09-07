@@ -373,6 +373,13 @@ function promptPillText(tree) {
   return renderedText(promptPillOf(tree));
 }
 
+function deepseekLogoOf(node, label) {
+  const logos = byType(node, "svg");
+  assert.equal(logos.length, 1, label + " renders one DeepSeek logo");
+  assert.equal(logos[0].props.viewBox, "0 0 24 24", label + " uses the DeepSeek viewBox");
+  return logos[0];
+}
+
 function promptWrapOf(tree) {
   const wraps = everyElement(tree, (n) => n.type === "div" && typeof n.props.onMouseEnter === "function");
   assert.equal(wraps.length, 1, "exactly one prompt-input hover wrapper");
@@ -425,13 +432,13 @@ function openPanel(mounted) {
   return mounted.tree();
 }
 
-test("prompt input hides healthy amount while retaining the DeepSeek icon", async () => {
+test("prompt input hides healthy amount while retaining the DeepSeek logo", async () => {
   const { plugin } = loadPlugin();
   const { mounted, resolveAction } = mountPromptPlugin(plugin, { slotProps: { taskId: "task-1" } });
   await resolveAction(0, okData({ display_prompt_input: true }));
 
   const text = promptPillText(mounted.tree());
-  assert.ok(text.includes("DS"), "prompt pill carries the uppercase DeepSeek fallback icon");
+  deepseekLogoOf(promptPillOf(mounted.tree()), "healthy prompt pill");
   assert.ok(!text.includes("¥110.00"), "healthy prompt balance hides the amount");
   mounted.unmount();
 });
@@ -447,7 +454,7 @@ test("prompt input suppresses amount at the warning threshold", async () => {
     }),
   );
 
-  assert.ok(promptPillText(mounted.tree()).includes("DS"), "threshold prompt pill keeps the icon");
+  deepseekLogoOf(promptPillOf(mounted.tree()), "threshold prompt pill");
   assert.ok(!promptPillText(mounted.tree()).includes("¥10.00"), "threshold amount stays hidden");
   mounted.unmount();
 });
@@ -584,8 +591,10 @@ test("pill renders the formatted primary-currency balance", async () => {
   await resolveAction(0, okData());
 
   const text = pillText(mounted.tree());
+  const logo = deepseekLogoOf(pillOf(mounted.tree()), "topbar pill");
+  assert.equal(logo.props.width, "14px", "topbar logo keeps the existing icon width");
+  assert.equal(logo.props.height, "14px", "topbar logo keeps the existing icon height");
   assert.ok(text.includes("¥110.00"), "pill shows the formatted total, got: " + text);
-  assert.ok(text.includes("DS"), "pill carries the uppercase DeepSeek fallback icon");
 });
 
 test("pill turns amber below the server-sent warn_below", async () => {
@@ -631,7 +640,7 @@ test("neutral checking state before the first snapshot", async () => {
   const text = pillText(mounted.tree());
   assert.ok(!text.includes("¥"), "no fabricated balance while loading");
   const loading = everyElement(pillOf(mounted.tree()), (n) => n.props["data-deepseek-state"] === "loading");
-  assert.equal(loading.length, 1, "loading state marked on the monogram");
+  assert.equal(loading.length, 1, "loading state marked on the DeepSeek logo");
 });
 
 test("unconfigured guidance links to plugin settings", async () => {
@@ -766,11 +775,12 @@ test("EMPTY balance_infos renders icon-only colored by is_available, no formatti
 
   const text = pillText(mounted.tree());
   assert.ok(!text.includes("¥"), "no currency amount without a primary currency");
+  deepseekLogoOf(pillOf(mounted.tree()), "icon-only pill");
   const coral = everyElement(
     pillOf(mounted.tree()),
-    (n) => n.type === "span" && n.props.style && n.props.style.background === "#d97b6c",
+    (n) => n.type === "span" && n.props.style && n.props.style.color === "#d97b6c",
   );
-  assert.equal(coral.length, 1, "icon-only pill colored coral when unavailable");
+  assert.equal(coral.length, 1, "icon-only logo colored coral when unavailable");
 });
 
 test("hover opens the panel and mouseleave schedules close via the padding-bridge timer", async () => {
